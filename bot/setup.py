@@ -9,6 +9,33 @@ from bot.shell import run_command
 from bot.util import check_auth
 
 
+def clone_github_repo(project_name, github_source=None):
+    """Clone GitHub repository into project directory"""
+    try:
+        project_path = os.path.join(PROJECTS_BASE, project_name)
+
+        # If no source provided, use default org
+        if not github_source:
+            github_source = f"{DEFAULT_GITHUB_ORG}/{project_name}"
+
+        # Construct GitHub URL
+        repo_url = f"https://github.com/{github_source}.git"
+
+        # Clone the repository
+        cmd = f"cd {PROJECTS_BASE} && gh repo clone {repo_url}"
+        output = run_command(cmd)
+
+        if "fatal" in output.lower() or "error" in output.lower():
+            log.error(f"Error cloning repo: {output}")
+            return False, output
+
+        log.info(f"Cloned repository: {github_source} to {project_path}")
+        return True, output
+    except Exception as e:
+        log.error(f"Error cloning GitHub repo: {str(e)}")
+        return False, f"Error: {str(e)}"
+
+
 def create_project_directory(project_name):
     """Create a new project directory"""
     try:
@@ -47,8 +74,6 @@ def setup_and_start_project(project_name):
         project_path = os.path.join(PROJECTS_BASE, project_name)
 
         steps = [
-            f"cd {project_path}",
-            "gh repo sync",
             f"cd {QUADLETS_DIR}",
             "gh repo sync",
             "systemctl --user daemon-reload",
@@ -75,12 +100,18 @@ async def newproject_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         await update.message.reply_text(
             "🆕 <b>New Project Setup</b>\n\n"
-            "Please send the project name (this will be used as the directory name and service name).",
-            parse_mode='HTML'
+            "Please send the GitHub source in one of these formats:\n\n"
+            "1. Just project name (e.g., <code>ptb-manager</code>)\n"
+            f"   → Will clone from {DEFAULT_GITHUB_ORG}/ptb-manager\n\n"
+            "2. Full source (e.g., <code>PXNX/ptb-manager</code>)\n"
+            "   → Will clone from specified org/user\n\n"
+            "3. Full URL (e.g., <code>https://github.com/PXNX/ptb-manager.git</code>)\n"
+            "   → Will clone from URL"
+
         )
 
-        # Store state to track we're waiting for project name
-        context.user_data['awaiting_project_name'] = True
+        # Store state to track we're waiting for GitHub source
+        context.user_data['awaiting_github_source'] = True
 
     except Exception as e:
         log.error(f"Error in newproject_command: {str(e)}", exc_info=True)
@@ -91,11 +122,39 @@ async def newproject_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle text messages for new project setup"""
     try:
-        # Check if we're waiting for project name
-        if context.user_data.get('awaiting_project_name'):
-            project_name = update.message.text.strip()
+        # Check if we're waiting for GitHub source
+        if context.user_data.get('awaiting_github_source'):
+            user_input = update.message.text.strip()
 
-            # Validate project name (alphanumeric, hyphens, underscores only)
+            # Parse the input
+            github_source = None
+            project_name = None
+
+            # Case 1: Full GitHub URL
+            if user_input.startswith('http'):
+                # Extract org/repo from URL
+                # https://github.com/PXNX/ptb-manager.git -> PXNX/ptb-manager
+                parts = user_input.replace('.git', '').split('/')
+                if len(parts) >= 2:
+                    github_source = f"{parts[-2]}/{parts[-1]}"
+                    project_name = parts[-1]
+                else:
+                    await update.message.reply_text(
+                        "❌ Invalid GitHub URL format. Please try again."
+                    )
+                    return
+
+            # Case 2: org/repo format
+            elif '/' in user_input:
+                github_source = user_input
+                project_name = user_input.split('/')[-1]
+
+            # Case 3: Just project name
+            else:
+                project_name = user_input
+                github_source = f"{DEFAULT_GITHUB_ORG}/{project_name}"
+
+            # Validate project name
             if not project_name or not all(c.isalnum() or c in '-_' for c in project_name):
                 await update.message.reply_text(
                     "❌ Invalid project name. Use only letters, numbers, hyphens, and underscores.\n"
@@ -103,28 +162,55 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-            # Create project directory
-            success, result = create_project_directory(project_name)
+            # Check if project already exists
+            project_path = os.path.join(PROJECTS_BASE, project_name)
+            if os.path.exists(project_path):
+                await update.message.reply_text(
+                    f"❌ Project directory already exists: {project_name}\n"
+                    "Please choose a different name or remove the existing directory."
+                )
+                context.user_data.clear()
+                return
+
+            # Clone the repository
+            await update.message.reply_text(
+                f"📥 Cloning repository: <code>{github_source}</code>\n"
+                f"Please wait..."
+
+            )
+
+            success, result = clone_github_repo(project_name, github_source)
 
             if not success:
-                await update.message.reply_text(f"❌ {result}")
+                await update.message.reply_text(
+                    f"❌ Failed to clone repository:\n\n<code>{result}</code>\n\n"
+                    f"Please check:\n"
+                    f"• Repository exists and is accessible\n"
+                    f"• You have gh CLI installed and authenticated\n"
+                    f"• The repository name is correct"
+
+                )
                 context.user_data.clear()
                 return
 
             # Store project name and move to next step
             context.user_data['project_name'] = project_name
-            context.user_data['awaiting_project_name'] = False
+            context.user_data['github_source'] = github_source
+            context.user_data['awaiting_github_source'] = False
             context.user_data['awaiting_env_content'] = True
 
             await update.message.reply_text(
-                f"✅ Project directory created: <code>{result}</code>\n\n"
+                f"✅ Repository cloned successfully!\n\n"
+                f"📁 Project: <code>{project_name}</code>\n"
+                f"📦 Source: <code>{github_source}</code>\n"
+                f"📂 Path: <code>{project_path}</code>\n\n"
                 f"📝 Now send the contents of the .env file.\n"
                 f"Send each environment variable on a new line, for example:\n\n"
                 f"<code>TELEGRAM_TOKEN=your_token_here\n"
                 f"API_KEY=your_api_key\n"
                 f"DATABASE_URL=postgres://...</code>\n\n"
-                f"Or send 'skip' to create an empty .env file.",
-                parse_mode='HTML'
+                f"Or send 'skip' to skip creating a .env file."
+
             )
 
         # Check if we're waiting for env content
@@ -133,7 +219,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             env_content = update.message.text.strip()
 
             if env_content.lower() == 'skip':
-                env_content = "# Add your environment variables here\n"
+                # Skip .env creation
+                context.user_data['awaiting_env_content'] = False
+
+                keyboard = [
+                    [InlineKeyboardButton("🔄 Setup & Start Project", callback_data=f"setup_{project_name}")],
+                    [InlineKeyboardButton("✅ Done (Manual Setup)", callback_data="setup_done")]
+                ]
+
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+                await update.message.reply_text(
+                    f"⏭ Skipped .env file creation.\n\n"
+                    f"🚀 <b>Next Steps:</b>\n\n"
+                    f"<b>Setup & Start Project</b> will:\n"
+                    f"1. Run gh repo sync in quadlets directory\n"
+                    f"2. Run systemctl --user daemon-reload\n"
+                    f"3. Start the container: systemctl --user start {project_name}\n\n"
+                    f"Or choose 'Done' to set up manually later.",
+                    reply_markup=reply_markup
+
+                )
+                return
 
             # Create .env file
             success, result = create_env_file(project_name, env_content)
@@ -158,13 +265,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"✅ .env file created: <code>{result}</code>\n\n"
                 f"🚀 <b>Next Steps:</b>\n\n"
                 f"<b>Setup & Start Project</b> will:\n"
-                f"1. Run gh repo sync in project directory\n"
-                f"2. Run gh repo sync in quadlets directory\n"
-                f"3. Run systemctl --user daemon-reload\n"
-                f"4. Start the container: systemctl --user start {project_name}\n\n"
+                f"1. Run gh repo sync in quadlets directory\n"
+                f"2. Run systemctl --user daemon-reload\n"
+                f"3. Start the container: systemctl --user start {project_name}\n\n"
                 f"Or choose 'Done' to set up manually later.",
-                reply_markup=reply_markup,
-                parse_mode='HTML'
+                reply_markup=reply_markup
+
             )
 
         else:

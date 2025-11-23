@@ -469,7 +469,6 @@ def main():
     application.add_handler(CommandHandler("dbbackup", dbbackup_command))
     application.add_handler(CommandHandler("newproject", newproject_command))
 
-
     # Callback handler
     application.add_handler(CallbackQueryHandler(button_callback))
 

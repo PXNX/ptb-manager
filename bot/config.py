@@ -9,3 +9,4 @@ ALLOWED_USER_IDS = [int(uid) for uid in os.environ.get('ALLOWED_USER_IDS', '').s
 PROJECTS_BASE = os.path.expanduser('~/projects')
 QUADLETS_DIR = os.path.expanduser("~/.config/containers/systemd")
 PODMAN_URL = os.getenv('PODMAN_URL', '')  # e.g., tcp://host.containers.internal:8888
+DEFAULT_GITHUB_ORG = os.getenv('DEFAULT_GITHUB_ORG', 'PXNX')

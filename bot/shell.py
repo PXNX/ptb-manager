@@ -5,7 +5,8 @@ from config import IS_CONTAINER, PODMAN_SOCK
 from logs import log
 
 
-def run_command(cmd):
+
+def run_command(cmd, timeout=30):
     """Execute shell command and return output"""
     try:
         # For podman commands in container, use socket connection
@@ -22,7 +23,7 @@ def run_command(cmd):
                 shell=True,
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=timeout
             )
         else:
             result = subprocess.run(
@@ -30,7 +31,7 @@ def run_command(cmd):
                 shell=True,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=timeout,
                 executable='/bin/bash'
             )
 

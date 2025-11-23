@@ -1,4 +1,5 @@
 import os
+import subprocess
 from datetime import datetime
 from io import BytesIO
 
@@ -11,7 +12,7 @@ from telegram.ext import (
     ContextTypes, Defaults,
 )
 
-from config import TELEGRAM_TOKEN, PROJECTS_BASE, ALLOWED_USER_IDS, QUADLETS_DIR, PODMAN_URL
+from config import TELEGRAM_TOKEN, PROJECTS_BASE, ALLOWED_USER_IDS, QUADLETS_DIR, PODMAN_URL, IS_CONTAINER, PODMAN_SOCK
 from database import dbbackup_command
 from logs import log
 from podman import restart_container, stop_container, start_container, redeploy_command, start_container_command, \
@@ -23,16 +24,6 @@ from stats import stats_command
 from util import check_auth
 
 
-def get_container_logs(container_id, lines=50):
-    """Get logs from a specific container"""
-    cmd = f"podman logs --tail {lines} {container_id}"
-    return run_command(cmd)
-
-
-def get_full_container_logs(container_id):
-    """Get full logs from a specific container"""
-    cmd = f"podman logs {container_id}"
-    return run_command(cmd)
 
 
 @check_auth
@@ -69,6 +60,26 @@ Available commands:
     await update.message.reply_text(welcome_text)
 
 
+
+
+def get_container_logs(container_id, lines=50):
+    """Get logs from a specific container"""
+    cmd = f"podman logs --tail {lines} {container_id}"
+    return run_command(cmd, timeout=30)
+
+
+def get_full_container_logs(container_id):
+    """Get full logs from a specific container with extended timeout"""
+    cmd = f"podman logs {container_id}"
+    return run_command(cmd, timeout=300)  # 5 minutes timeout for large logs
+
+
+def get_full_container_logs_since(container_id, since='24h'):
+    """Get logs from a specific container since a time period"""
+    cmd = f"podman logs --since {since} {container_id}"
+    return run_command(cmd, timeout=120)  # 2 minutes timeout
+
+
 @check_auth
 async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show logs selection menu"""
@@ -88,13 +99,13 @@ async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ),
                 InlineKeyboardButton(
                     "💾 Download",
-                    callback_data=f"dlogs_{c['id']}"
+                    callback_data=f"dlogsmenu_{c['id']}"
                 )
             ])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            "Select a container:\n📄 View last 100 lines | 💾 Download full log",
+            "Select a container:\n📄 View last 100 lines | 💾 Download options",
             reply_markup=reply_markup
         )
     except Exception as e:
@@ -246,6 +257,148 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
             await query.message.reply_text("✅ Log file sent successfully!")
+
+        elif data.startswith('dlogsmenu_'):
+            container_id = data.replace('dlogsmenu_', '')
+
+            # Get container name for display
+            containers = get_podman_containers()
+            container_name = next((c['name'] for c in containers if c['id'] == container_id), container_id[:12])
+            safe_container_name = container_name.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(
+                '`', '\\`')
+
+            keyboard = [
+                [InlineKeyboardButton("📅 Last 24 hours", callback_data=f"dlogs24h_{container_id}")],
+                [InlineKeyboardButton("📅 Last 1 hour", callback_data=f"dlogs1h_{container_id}")],
+                [InlineKeyboardButton("📋 Full logs", callback_data=f"dlogs_{container_id}")],
+                [InlineKeyboardButton("◀️ Back", callback_data="back_to_logs")]
+            ]
+
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                f"📥 *Download logs for {safe_container_name}*\n\n"
+                f"Choose time range:\n"
+                f"⚠️ Full logs may take a while for large files",
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+        elif data.startswith('dlogs24h_'):
+            container_id = data.replace('dlogs24h_', '')
+            log.info(f"Downloading 24h logs for container: {container_id}")
+
+            containers = get_podman_containers()
+            container_name = next((c['name'] for c in containers if c['id'] == container_id), container_id[:12])
+
+            await query.edit_message_text("📥 Preparing log file (last 24 hours)... ⏳")
+
+            logs = get_full_container_logs_since(container_id, '24h')
+
+            if not logs or logs.strip() == "" or "Command timed out" in logs:
+                await query.edit_message_text(
+                    f"❌ Failed to retrieve logs: {logs if 'Command timed out' in logs else 'No logs found'}")
+                return
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{container_name}_24h_{timestamp}.log"
+
+            safe_container_name = container_name.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(
+                '`', '\\`')
+
+            log_bytes = BytesIO(logs.encode('utf-8'))
+            log_bytes.name = filename
+
+            await query.edit_message_text("📤 Uploading log file...")
+
+            await query.message.reply_document(
+                document=log_bytes,
+                filename=filename,
+                caption=f"📋 Logs for *{safe_container_name}* (last 24h)\n🕐 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+            await query.message.reply_text("✅ Log file sent successfully!")
+
+        elif data.startswith('dlogs1h_'):
+            container_id = data.replace('dlogs1h_', '')
+            log.info(f"Downloading 1h logs for container: {container_id}")
+
+            containers = get_podman_containers()
+            container_name = next((c['name'] for c in containers if c['id'] == container_id), container_id[:12])
+
+            await query.edit_message_text("📥 Preparing log file (last hour)... ⏳")
+
+            logs = get_full_container_logs_since(container_id, '1h')
+
+            if not logs or logs.strip() == "" or "Command timed out" in logs:
+                await query.edit_message_text(
+                    f"❌ Failed to retrieve logs: {logs if 'Command timed out' in logs else 'No logs found'}")
+                return
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{container_name}_1h_{timestamp}.log"
+
+            safe_container_name = container_name.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(
+                '`', '\\`')
+
+            log_bytes = BytesIO(logs.encode('utf-8'))
+            log_bytes.name = filename
+
+            await query.edit_message_text("📤 Uploading log file...")
+
+            await query.message.reply_document(
+                document=log_bytes,
+                filename=filename,
+                caption=f"📋 Logs for *{safe_container_name}* (last hour)\n🕐 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+            await query.message.reply_text("✅ Log file sent successfully!")
+
+        elif data.startswith('dlogs_'):
+            container_id = data.replace('dlogs_', '')
+            log.info(f"Downloading full logs for container: {container_id}")
+
+            containers = get_podman_containers()
+            container_name = next((c['name'] for c in containers if c['id'] == container_id), container_id[:12])
+
+            await query.edit_message_text(
+                "📥 Preparing full log file... ⏳\n\n⚠️ This may take several minutes for large logs.")
+
+            full_logs = get_full_container_logs(container_id)
+
+            if not full_logs or full_logs.strip() == "" or "Command timed out" in full_logs:
+                await query.edit_message_text(
+                    f"❌ Failed to retrieve full logs.\n\n"
+                    f"{'The operation timed out. ' if 'Command timed out' in full_logs else ''}"
+                    f"Try using the 24h or 1h options instead for large log files."
+                )
+                return
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{container_name}_full_{timestamp}.log"
+
+            safe_container_name = container_name.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(
+                '`', '\\`')
+
+            log_bytes = BytesIO(full_logs.encode('utf-8'))
+            log_bytes.name = filename
+
+            await query.edit_message_text("📤 Uploading log file...")
+
+            await query.message.reply_document(
+                document=log_bytes,
+                filename=filename,
+                caption=f"📋 Full logs for *{safe_container_name}*\n🕐 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+            await query.message.reply_text("✅ Log file sent successfully!")
+
+        elif data == 'back_to_logs':
+            await query.answer()
+            # Re-trigger the logs command
+            await logs_command(query, context)
 
         elif data.startswith('restart_'):
             container_id = data.replace('restart_', '')

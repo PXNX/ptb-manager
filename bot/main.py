@@ -17,6 +17,7 @@ from bot.logs import log
 from bot.podman import restart_container, stop_container, start_container, redeploy_command, start_container_command, \
     stop_command, restart_command, get_podman_containers, containers_command
 from bot.quadlet import reload_systemd_quadlets, get_quadlet_files, quadlets_command
+from bot.setup import setup_and_start_project, newproject_command
 from bot.shell import run_command
 from bot.stats import stats_command
 from bot.util import check_auth
@@ -38,21 +39,22 @@ def get_full_container_logs(container_id):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command handler"""
     welcome_text = """
-🤖 <b>Podman Monitoring Bot</b>
+    🤖 <b>Podman Monitoring Bot</b>
 
-Available commands:
-/containers - List all containers
-/stats - Show system resources
-/logs - Get container logs
-/restart - Restart a container
-/stop - Stop a container
-/start - Start a container
-/redeploy - Redeploy a project (Linux only)
-/quadlets - Manage quadlet files (Linux only)
-/envfiles - View project .env files
-/dbbackup - Backup PostgreSQL database
-/help - Show this message
-"""
+    Available commands:
+    /containers - List all containers
+    /stats - Show system resources
+    /logs - Get container logs
+    /restart - Restart a container
+    /stop - Stop a container
+    /start - Start a container
+    /redeploy - Redeploy a project (Linux only)
+    /quadlets - Manage quadlet files (Linux only)
+    /envfiles - View project .env files
+    /dbbackup - Backup PostgreSQL database
+    /newproject - Setup a new project (Linux only)
+    /help - Show this message
+    """
     await update.message.reply_text(welcome_text)
 
 
@@ -394,6 +396,28 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode=ParseMode.MARKDOWN
             )
 
+        elif data.startswith('setup_'):
+            project_name = data.replace('setup_', '')
+            log.info(f"Setting up and starting project: {project_name}")
+
+            await query.edit_message_text(f"🔄 Setting up {project_name}...\n\nThis may take a moment.")
+
+            output = setup_and_start_project(project_name)
+
+            result_text = f"✅ *Setup completed for {project_name}*\n\n"
+            result_text += f"The container should now be starting.\n\n"
+            result_text += f"```\n{output}\n```\n\n"
+            result_text += f"Use /containers to check the status."
+
+            log.info(f"Setup completed for {project_name}")
+            await query.edit_message_text(result_text, parse_mode='Markdown')
+
+        elif data == 'setup_done':
+            await query.edit_message_text(
+                "✅ Project setup complete!\n\n"
+                "You can now manually configure your project or use the other bot commands to manage it."
+            )
+
     except Exception as e:
         log.error(f"Error in button_callback: {str(e)}", exc_info=True)
         await query.edit_message_text(f"❌ Error: {str(e)}")
@@ -427,7 +451,7 @@ def main():
     if PODMAN_URL:
         log.info(f"Podman URL: {PODMAN_URL}")
 
-    defaults = Defaults(parse_mode='HTML')
+    defaults = Defaults(parse_mode=ParseMode.HTML)
     application = Application.builder().token(TELEGRAM_TOKEN).defaults(defaults).build()
 
     # Command handlers
@@ -443,6 +467,8 @@ def main():
     application.add_handler(CommandHandler("quadlets", quadlets_command))
     application.add_handler(CommandHandler("envfiles", envfiles_command))
     application.add_handler(CommandHandler("dbbackup", dbbackup_command))
+    application.add_handler(CommandHandler("newproject", newproject_command))
+
 
     # Callback handler
     application.add_handler(CallbackQueryHandler(button_callback))

@@ -1,3 +1,5 @@
 /bot/logs
-/bot/.env
+/.env
 /.idea
+/venv
+/.venv

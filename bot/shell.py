@@ -1,16 +1,20 @@
 import os
 import subprocess
 
-from config import PODMAN_URL
+from config import PODMAN_URL, PODMAN_CMD
 from logs import log
 
 
 def run_command(cmd):
     """Execute shell command and return output"""
     try:
-        # Add Podman URL if set and command starts with 'podman'
-        if PODMAN_URL and cmd.strip().startswith('podman'):
-            cmd = cmd.replace('podman', f'podman --url {PODMAN_URL}', 1)
+        # Replace 'podman' with full path
+        if cmd.strip().startswith('podman'):
+            cmd = cmd.replace('podman', PODMAN_CMD, 1)
+
+        # Add Podman URL if set and command starts with podman
+        if PODMAN_URL and PODMAN_CMD in cmd:
+            cmd = cmd.replace(PODMAN_CMD, f'{PODMAN_CMD} --url {PODMAN_URL}', 1)
 
         log.debug(f"Executing command: {cmd}")
 

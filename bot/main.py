@@ -39,22 +39,33 @@ def get_full_container_logs(container_id):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command handler"""
     welcome_text = """
-    🤖 <b>Podman Monitoring Bot</b>
+🤖 <b>Podman Monitoring Bot</b>
 
-    Available commands:
-    /containers - List all containers
-    /stats - Show system resources
-    /logs - Get container logs
-    /restart - Restart a container
-    /stop - Stop a container
-    /start - Start a container
-    /redeploy - Redeploy a project (Linux only)
-    /quadlets - Manage quadlet files (Linux only)
-    /envfiles - View project .env files
-    /dbbackup - Backup PostgreSQL database
-    /newproject - Setup a new project (Linux only)
-    /help - Show this message
-    """
+Available commands:
+
+/containers - List all containers
+
+/stats - Show system resources
+
+/logs - Get container logs
+
+/restart - Restart a container
+
+/stop - Stop a container
+
+/start - Start a container
+
+/redeploy - Redeploy a project (Linux only)
+
+/quadlets - Manage quadlet files (Linux only)
+
+/envfiles - View project .env files
+
+/dbbackup - Backup PostgreSQL database
+
+/newproject - Setup a new project (Linux only)
+
+/help - Show this message"""
     await update.message.reply_text(welcome_text)
 
 

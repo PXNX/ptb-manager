@@ -1,20 +1,17 @@
 import os
 import subprocess
 
-from config import PODMAN_URL, PODMAN_CMD
+from config import IS_CONTAINER, PODMAN_SOCK
 from logs import log
 
 
 def run_command(cmd):
     """Execute shell command and return output"""
     try:
-        # Replace 'podman' with full path
-        if cmd.strip().startswith('podman'):
-            cmd = cmd.replace('podman', PODMAN_CMD, 1)
-
-        # Add Podman URL if set and command starts with podman
-        if PODMAN_URL and PODMAN_CMD in cmd:
-            cmd = cmd.replace(PODMAN_CMD, f'{PODMAN_CMD} --url {PODMAN_URL}', 1)
+        # For podman commands in container, use socket connection
+        if cmd.strip().startswith('podman') and IS_CONTAINER:
+            # Use podman with remote socket connection
+            cmd = cmd.replace('podman', f'podman --remote --url unix://{PODMAN_SOCK}', 1)
 
         log.debug(f"Executing command: {cmd}")
 

@@ -3,9 +3,9 @@ import os
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton, Update
 from telegram.ext import ContextTypes
 
-from bot.logs import log
-from bot.shell import run_command
-from bot.util import check_auth
+from logs import log
+from shell import run_command
+from util import check_auth
 
 
 def restart_container(container_id):

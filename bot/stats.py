@@ -5,8 +5,8 @@ import psutil
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from bot.logs import log
-from bot.util import check_auth
+from logs import log
+from util import check_auth
 
 
 def get_system_stats():

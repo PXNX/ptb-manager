@@ -11,16 +11,16 @@ from telegram.ext import (
     ContextTypes, Defaults,
 )
 
-from bot.config import TELEGRAM_TOKEN, PROJECTS_BASE, ALLOWED_USER_IDS, QUADLETS_DIR, PODMAN_URL
-from bot.database import dbbackup_command
-from bot.logs import log
-from bot.podman import restart_container, stop_container, start_container, redeploy_command, start_container_command, \
+from config import TELEGRAM_TOKEN, PROJECTS_BASE, ALLOWED_USER_IDS, QUADLETS_DIR, PODMAN_URL
+from database import dbbackup_command
+from logs import log
+from podman import restart_container, stop_container, start_container, redeploy_command, start_container_command, \
     stop_command, restart_command, get_podman_containers, containers_command
-from bot.quadlet import reload_systemd_quadlets, get_quadlet_files, quadlets_command
-from bot.setup import setup_and_start_project, newproject_command
-from bot.shell import run_command
-from bot.stats import stats_command
-from bot.util import check_auth
+from quadlet import reload_systemd_quadlets, get_quadlet_files, quadlets_command
+from setup import setup_and_start_project, newproject_command
+from shell import run_command
+from stats import stats_command
+from util import check_auth
 
 
 def get_container_logs(container_id, lines=50):

@@ -1,8 +1,8 @@
 import os
 import subprocess
 
-from bot.config import PODMAN_URL
-from bot.logs import log
+from config import PODMAN_URL
+from logs import log
 
 
 def run_command(cmd):

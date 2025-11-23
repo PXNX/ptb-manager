@@ -3,10 +3,10 @@ import os
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
-from bot.config import PROJECTS_BASE, QUADLETS_DIR
-from bot.logs import log
-from bot.shell import run_command
-from bot.util import check_auth
+from config import PROJECTS_BASE, QUADLETS_DIR, DEFAULT_GITHUB_ORG
+from logs import log
+from shell import run_command
+from util import check_auth
 
 
 def clone_github_repo(project_name, github_source=None):

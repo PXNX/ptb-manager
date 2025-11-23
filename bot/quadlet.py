@@ -5,10 +5,10 @@ from pathlib import Path
 from telegram import InlineKeyboardButton, Update, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from bot.config import QUADLETS_DIR
-from bot.logs import log
-from bot.shell import run_command
-from bot.util import check_auth
+from config import QUADLETS_DIR
+from logs import log
+from shell import run_command
+from util import check_auth
 
 
 def get_quadlet_files():

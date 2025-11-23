@@ -3,8 +3,8 @@ from functools import wraps
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from bot.config import ALLOWED_USER_IDS
-from bot.logs import log
+from config import ALLOWED_USER_IDS
+from logs import log
 
 
 def check_auth(func):

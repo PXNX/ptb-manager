@@ -1,92 +1,25 @@
 import os
-import subprocess
-import tempfile
 from datetime import datetime
 from io import BytesIO
 
-import psutil
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
-    ContextTypes,
+    ContextTypes, Defaults,
 )
-from telegram.constants import ParseMode
 
-from bot.config import TELEGRAM_TOKEN, PROJECTS_BASE, ALLOWED_USER_IDS
+from bot.config import TELEGRAM_TOKEN, PROJECTS_BASE, ALLOWED_USER_IDS, QUADLETS_DIR, PODMAN_URL
+from bot.database import dbbackup_command
 from bot.logs import log
+from bot.podman import restart_container, stop_container, start_container, redeploy_command, start_container_command, \
+    stop_command, restart_command, get_podman_containers, containers_command
+from bot.quadlet import reload_systemd_quadlets, get_quadlet_files, quadlets_command
+from bot.shell import run_command
+from bot.stats import stats_command
 from bot.util import check_auth
-
-from bot.config import TELEGRAM_TOKEN, PROJECTS_BASE, ALLOWED_USER_IDS
-from bot.logs import log
-from bot.util import check_auth
-
-# Podman connection settings for Windows
-PODMAN_URL = os.getenv('PODMAN_URL', '')  # e.g., tcp://host.containers.internal:8888
-
-
-def run_command(cmd):
-    """Execute shell command and return output"""
-    try:
-        # Add Podman URL if set and command starts with 'podman'
-        if PODMAN_URL and cmd.strip().startswith('podman'):
-            cmd = cmd.replace('podman', f'podman --url {PODMAN_URL}', 1)
-
-        log.debug(f"Executing command: {cmd}")
-
-        # On Windows, use shell=True, on Unix use bash
-        if os.name == 'nt':
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-        else:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                executable='/bin/bash'
-            )
-
-        if result.returncode != 0:
-            log.error(f"Command failed with return code {result.returncode}: {result.stderr}")
-        return result.stdout if result.returncode == 0 else result.stderr
-    except subprocess.TimeoutExpired:
-        log.error(f"Command timed out: {cmd}")
-        return "Command timed out"
-    except Exception as e:
-        log.error(f"Command execution error: {str(e)}")
-        return f"Error: {str(e)}"
-
-
-def get_podman_containers():
-    """Get list of Podman containers with their status"""
-    # Use double quotes for Windows compatibility
-    if os.name == 'nt':
-        cmd = 'podman ps -a --format "{{.ID}}|{{.Names}}|{{.Status}}|{{.Image}}"'
-    else:
-        cmd = "podman ps -a --format '{{.ID}}|{{.Names}}|{{.Status}}|{{.Image}}'"
-
-    output = run_command(cmd)
-
-    containers = []
-    for line in output.strip().split('\n'):
-        if line and '|' in line:
-            parts = line.split('|')
-            if len(parts) == 4:
-                containers.append({
-                    'id': parts[0][:12],
-                    'name': parts[1],
-                    'status': parts[2],
-                    'image': parts[3]
-                })
-    return containers
 
 
 def get_container_logs(container_id, lines=50):
@@ -99,100 +32,6 @@ def get_full_container_logs(container_id):
     """Get full logs from a specific container"""
     cmd = f"podman logs {container_id}"
     return run_command(cmd)
-
-
-def restart_container(container_id):
-    """Restart a container"""
-    cmd = f"podman restart {container_id}"
-    return run_command(cmd)
-
-
-def stop_container(container_id):
-    """Stop a container"""
-    cmd = f"podman stop {container_id}"
-    return run_command(cmd)
-
-
-def start_container(container_id):
-    """Start a container"""
-    cmd = f"podman start {container_id}"
-    return run_command(cmd)
-
-
-def get_system_stats():
-    """Get system resource usage"""
-    try:
-        cpu_percent = psutil.cpu_percent(interval=1)
-        memory = psutil.virtual_memory()
-
-        # Get disk usage - try multiple methods for Windows compatibility
-        disk_display = 'System'
-        try:
-            if os.name == 'nt':
-                # Try different Windows paths
-                for path in ['C:/', 'C:', os.path.expanduser('~')]:
-                    try:
-                        disk = psutil.disk_usage(path)
-                        disk_display = path
-                        break
-                    except:
-                        continue
-                else:
-                    # If all fail, get first partition
-                    partitions = psutil.disk_partitions()
-                    if partitions:
-                        disk = psutil.disk_usage(partitions[0].mountpoint)
-                        disk_display = partitions[0].mountpoint
-                    else:
-                        raise Exception("No disk partitions found")
-            else:
-                disk = psutil.disk_usage('/')
-                disk_display = '/'
-        except Exception as disk_error:
-            # If disk check fails, set dummy values
-            log.warning(f"Could not get disk usage: {disk_error}")
-
-            class DummyDisk:
-                percent = 0
-                used = 0
-                total = 0
-
-            disk = DummyDisk()
-            disk_display = 'N/A'
-
-        boot_time = datetime.fromtimestamp(psutil.boot_time())
-        uptime = datetime.now() - boot_time
-
-        stats = f"""
-🖥 <b>System Resources</b>
-
-<b>CPU Usage:</b> {cpu_percent}%
-<b>Memory:</b> {memory.percent}% ({memory.used // (1024 ** 3)}GB / {memory.total // (1024 ** 3)}GB)
-<b>Disk ({disk_display}):</b> {disk.percent}% ({disk.used // (1024 ** 3)}GB / {disk.total // (1024 ** 3)}GB)
-<b>Uptime:</b> {uptime.days}d {uptime.seconds // 3600}h {(uptime.seconds % 3600) // 60}m
-"""
-        return stats
-    except Exception as e:
-        log.error(f"Error getting system stats: {str(e)}", exc_info=True)
-        # Escape any HTML-like characters in error message
-        error_msg = str(e).replace('<', '&lt;').replace('>', '&gt;')
-        return f"❌ Error getting system stats: {error_msg}"
-
-
-def format_containers_list(containers):
-    """Format containers list for display"""
-    if not containers:
-        return "No containers found."
-
-    text = "🐳 <b>Podman Containers</b>\n\n"
-    for c in containers:
-        status_emoji = "🟢" if "Up" in c['status'] else "🔴"
-        text += f"{status_emoji} <b>{c['name']}</b>\n"
-        text += f"  ID: <code>{c['id']}</code>\n"
-        text += f"  Status: {c['status']}\n"
-        text += f"  Image: {c['image']}\n\n"
-
-    return text
 
 
 @check_auth
@@ -209,32 +48,12 @@ Available commands:
 /stop - Stop a container
 /start - Start a container
 /redeploy - Redeploy a project (Linux only)
+/quadlets - Manage quadlet files (Linux only)
+/envfiles - View project .env files
+/dbbackup - Backup PostgreSQL database
 /help - Show this message
 """
-    await update.message.reply_text(welcome_text, parse_mode='HTML')
-
-
-@check_auth
-async def containers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show all containers"""
-    try:
-        containers = get_podman_containers()
-        text = format_containers_list(containers)
-        await update.message.reply_text(text, parse_mode='HTML')
-    except Exception as e:
-        log.error(f"Error in containers_command: {str(e)}", exc_info=True)
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-
-@check_auth
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show system statistics"""
-    try:
-        stats = get_system_stats()
-        await update.message.reply_text(stats, parse_mode='HTML')
-    except Exception as e:
-        log.error(f"Error in stats_command: {str(e)}", exc_info=True)
-        await update.message.reply_text(f"❌ Error: {str(e)}")
+    await update.message.reply_text(welcome_text)
 
 
 @check_auth
@@ -270,132 +89,66 @@ async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
-@check_auth
-async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show restart menu"""
+def read_file_content(file_path):
+    """Read and return file content"""
     try:
-        containers = get_podman_containers()
+        with open(file_path, 'r') as f:
+            return f.read()
+    except Exception as e:
+        log.error(f"Error reading file {file_path}: {str(e)}")
+        return f"Error reading file: {str(e)}"
 
-        if not containers:
-            await update.message.reply_text("No containers found.")
+
+def get_project_env_files():
+    """Get list of .env files in project directories"""
+    try:
+        if not os.path.exists(PROJECTS_BASE):
+            return []
+
+        env_files = []
+        for project_dir in os.listdir(PROJECTS_BASE):
+            project_path = os.path.join(PROJECTS_BASE, project_dir)
+            env_path = os.path.join(project_path, '.env')
+
+            if os.path.isfile(env_path):
+                stat = os.stat(env_path)
+                mtime = datetime.fromtimestamp(stat.st_mtime)
+                env_files.append({
+                    'project': project_dir,
+                    'path': env_path,
+                    'modified': mtime.strftime("%Y-%m-%d %H:%M:%S")
+                })
+
+        return sorted(env_files, key=lambda x: x['project'])
+    except Exception as e:
+        log.error(f"Error getting .env files: {str(e)}")
+        return []
+
+
+@check_auth
+async def envfiles_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show .env files menu"""
+    try:
+        env_files = get_project_env_files()
+
+        if not env_files:
+            await update.message.reply_text("No .env files found in project directories.")
             return
 
         keyboard = []
-        for c in containers:
+        for env in env_files:
             keyboard.append([InlineKeyboardButton(
-                f"{c['name']} ({c['id'][:8]})",
-                callback_data=f"restart_{c['id']}"
+                f"📄 {env['project']} (Modified: {env['modified']})",
+                callback_data=f"env_{env['project']}"
             )])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            "Select a container to restart:",
+            "Select a project to view its .env file:",
             reply_markup=reply_markup
         )
     except Exception as e:
-        log.error(f"Error in restart_command: {str(e)}", exc_info=True)
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-
-@check_auth
-async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show stop menu"""
-    try:
-        containers = get_podman_containers()
-
-        if not containers:
-            await update.message.reply_text("No containers found.")
-            return
-
-        # Only show running containers
-        running_containers = [c for c in containers if "Up" in c['status']]
-
-        if not running_containers:
-            await update.message.reply_text("No running containers found.")
-            return
-
-        keyboard = []
-        for c in running_containers:
-            keyboard.append([InlineKeyboardButton(
-                f"{c['name']} ({c['id'][:8]})",
-                callback_data=f"stop_{c['id']}"
-            )])
-
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "Select a container to stop:",
-            reply_markup=reply_markup
-        )
-    except Exception as e:
-        log.error(f"Error in stop_command: {str(e)}", exc_info=True)
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-
-@check_auth
-async def start_container_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show start menu"""
-    try:
-        containers = get_podman_containers()
-
-        if not containers:
-            await update.message.reply_text("No containers found.")
-            return
-
-        # Only show stopped containers
-        stopped_containers = [c for c in containers if "Up" not in c['status']]
-
-        if not stopped_containers:
-            await update.message.reply_text("No stopped containers found.")
-            return
-
-        keyboard = []
-        for c in stopped_containers:
-            keyboard.append([InlineKeyboardButton(
-                f"{c['name']} ({c['id'][:8]})",
-                callback_data=f"start_{c['id']}"
-            )])
-
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "Select a container to start:",
-            reply_markup=reply_markup
-        )
-    except Exception as e:
-        log.error(f"Error in start_container_command: {str(e)}", exc_info=True)
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-
-@check_auth
-async def redeploy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show redeploy menu (Linux/systemd only)"""
-    try:
-        if os.name == 'nt':
-            await update.message.reply_text(
-                "❌ Redeploy command is not supported on Windows.\n"
-                "Use /restart to restart containers instead."
-            )
-            return
-
-        containers = get_podman_containers()
-
-        if not containers:
-            await update.message.reply_text("No containers found.")
-            return
-
-        keyboard = []
-        for c in containers:
-            keyboard.append([InlineKeyboardButton(
-                c['name'],
-                callback_data=f"redeploy_{c['name']}"
-            )])
-
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "Select a project to redeploy:",
-            reply_markup=reply_markup
-        )
-    except Exception as e:
-        log.error(f"Error in redeploy_command: {str(e)}", exc_info=True)
+        log.error(f"Error in envfiles_command: {str(e)}", exc_info=True)
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
@@ -560,6 +313,87 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log.info(f"Redeploy completed for {service}")
             await query.edit_message_text(result_text, parse_mode='Markdown')
 
+        elif data == 'quadlets_reload':
+            log.info("Reloading quadlets")
+            await query.edit_message_text("🔄 Reloading quadlets and systemd daemon...")
+
+            output = reload_systemd_quadlets()
+
+            result_text = "✅ *Quadlets reloaded successfully*\n\n"
+            result_text += f"```\n{output}\n```"
+
+            log.info("Quadlets reloaded")
+            await query.edit_message_text(result_text, parse_mode='Markdown')
+
+        elif data == 'quadlets_list':
+            log.info("Listing quadlet files")
+            quadlets = get_quadlet_files()
+
+            if not quadlets:
+                await query.edit_message_text("No quadlet files found.")
+                return
+
+            keyboard = []
+            for q in quadlets:
+                keyboard.append([InlineKeyboardButton(
+                    f"📝 {q['name']} (Modified: {q['modified']})",
+                    callback_data=f"quadlet_{q['name']}"
+                )])
+
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                "Select a quadlet file to inspect:",
+                reply_markup=reply_markup
+            )
+
+        elif data.startswith('quadlet_'):
+            filename = data.replace('quadlet_', '')
+            log.info(f"Inspecting quadlet file: {filename}")
+
+            file_path = os.path.join(QUADLETS_DIR, filename)
+            content = read_file_content(file_path)
+
+            # Escape special characters for Markdown
+            safe_filename = filename.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+
+            # Check length
+            max_length = 4000
+            if len(content) > max_length:
+                content = content[:max_length] + "\n... (truncated)"
+
+            await query.edit_message_text(
+                f"📝 *Quadlet: {safe_filename}*\n\n```\n{content}\n```",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+        elif data.startswith('env_'):
+            project = data.replace('env_', '')
+            log.info(f"Viewing .env file for project: {project}")
+
+            env_path = os.path.join(PROJECTS_BASE, project, '.env')
+
+            if not os.path.exists(env_path):
+                await query.edit_message_text(f"❌ .env file not found for project: {project}")
+                return
+
+            content = read_file_content(env_path)
+
+            # Escape special characters for Markdown
+            safe_project = project.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+
+            # Check length
+            max_length = 4000
+            if len(content) > max_length:
+                content = content[:max_length] + "\n... (truncated)"
+
+            # Warning message about sensitive data
+            warning = "⚠️ *Sensitive Data Warning*\n\n"
+
+            await query.edit_message_text(
+                f"{warning}📄 *.env file for {safe_project}*\n\n```\n{content}\n```",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
     except Exception as e:
         log.error(f"Error in button_callback: {str(e)}", exc_info=True)
         await query.edit_message_text(f"❌ Error: {str(e)}")
@@ -593,7 +427,8 @@ def main():
     if PODMAN_URL:
         log.info(f"Podman URL: {PODMAN_URL}")
 
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    defaults = Defaults(parse_mode='HTML')
+    application = Application.builder().token(TELEGRAM_TOKEN).defaults(defaults).build()
 
     # Command handlers
     application.add_handler(CommandHandler("start", start))
@@ -605,6 +440,9 @@ def main():
     application.add_handler(CommandHandler("stop", stop_command))
     application.add_handler(CommandHandler("start", start_container_command))
     application.add_handler(CommandHandler("redeploy", redeploy_command))
+    application.add_handler(CommandHandler("quadlets", quadlets_command))
+    application.add_handler(CommandHandler("envfiles", envfiles_command))
+    application.add_handler(CommandHandler("dbbackup", dbbackup_command))
 
     # Callback handler
     application.add_handler(CallbackQueryHandler(button_callback))

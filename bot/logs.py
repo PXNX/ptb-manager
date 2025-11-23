@@ -42,4 +42,5 @@ def setup_logging():
 
     return logger
 
+
 log = setup_logging()

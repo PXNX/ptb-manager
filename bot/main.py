@@ -1,5 +1,4 @@
 import os
-import subprocess
 from datetime import datetime
 from io import BytesIO
 
@@ -12,7 +11,7 @@ from telegram.ext import (
     ContextTypes, Defaults,
 )
 
-from config import TELEGRAM_TOKEN, PROJECTS_BASE, ALLOWED_USER_IDS, QUADLETS_DIR, PODMAN_URL, IS_CONTAINER, PODMAN_SOCK
+from config import TELEGRAM_TOKEN, PROJECTS_BASE, ALLOWED_USER_IDS, QUADLETS_DIR, PODMAN_URL
 from database import dbbackup_command
 from logs import log
 from podman import restart_container, stop_container, start_container, redeploy_command, start_container_command, \
@@ -22,8 +21,6 @@ from setup import setup_and_start_project, newproject_command
 from shell import run_command
 from stats import stats_command
 from util import check_auth
-
-
 
 
 @check_auth
@@ -58,8 +55,6 @@ Available commands:
 
 /help - Show this message"""
     await update.message.reply_text(welcome_text)
-
-
 
 
 def get_container_logs(container_id, lines=50):

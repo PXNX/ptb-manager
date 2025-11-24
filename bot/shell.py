@@ -5,7 +5,6 @@ from config import IS_CONTAINER, PODMAN_SOCK
 from logs import log
 
 
-
 def run_command(cmd, timeout=30):
     """Execute shell command and return output"""
     try:

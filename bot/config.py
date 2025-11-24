@@ -11,7 +11,7 @@ PODMAN_URL = os.getenv('PODMAN_URL', '')  # e.g., tcp://host.containers.internal
 DEFAULT_GITHUB_ORG = os.getenv('DEFAULT_GITHUB_ORG', 'PXNX')
 PODMAN_CMD = os.getenv('PODMAN_CMD', '/usr/bin/podman')
 
-IS_CONTAINER = os.getenv('CONTAINER') == 'true'
+IS_CONTAINER = os.getenv('CONTAINER') == 'true' or os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv')
 PODMAN_SOCK = os.getenv('PODMAN_SOCK', '/run/podman/podman.sock')
 
 # Use containerized paths if running in container, otherwise use host paths

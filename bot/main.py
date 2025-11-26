@@ -8,7 +8,7 @@ from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
-    ContextTypes, Defaults,
+    ContextTypes, Defaults, MessageHandler, filters,
 )
 
 from config import TELEGRAM_TOKEN, PROJECTS_BASE, ALLOWED_USER_IDS, QUADLETS_DIR, PODMAN_URL
@@ -17,7 +17,7 @@ from logs import log
 from podman import restart_container, stop_container, start_container, redeploy_command, start_container_command, \
     stop_command, restart_command, get_podman_containers, containers_command
 from quadlet import reload_systemd_quadlets, get_quadlet_files, quadlets_command
-from setup import setup_and_start_project, newproject_command
+from setup import setup_and_start_project, newproject_command, handle_message
 from shell import run_command
 from stats import stats_command
 from util import check_auth
@@ -627,6 +627,9 @@ def main():
     application.add_handler(CommandHandler("envfiles", envfiles_command))
     application.add_handler(CommandHandler("dbbackup", dbbackup_command))
     application.add_handler(CommandHandler("newproject", newproject_command))
+
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
 
     # Callback handler
     application.add_handler(CallbackQueryHandler(button_callback))

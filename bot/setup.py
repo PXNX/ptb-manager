@@ -140,22 +140,37 @@ def clone_github_repo(project_name, github_source=None):
 
         # Clone the repository - gh repo clone automatically creates the directory
         # We need to specify the target directory name
+        # Use absolute path to ensure it goes to the right place
         cmd = f"cd {PROJECTS_BASE} && gh repo clone {repo_url} {project_name}"
-        output = run_command(cmd)
+        log.info(f"Executing clone command: {cmd}")
+        log.info(f"PROJECTS_BASE: {PROJECTS_BASE}")
+        log.info(f"Target project_path: {project_path}")
+
+        output = run_command(cmd, timeout=60)  # Increase timeout for cloning
 
         if "fatal" in output.lower() or "error" in output.lower():
             log.error(f"Error cloning repo: {output}")
             return False, output
 
+        # Give filesystem a moment to sync
+        import time
+        time.sleep(1)
+
         # Verify the directory was created
         if not os.path.exists(project_path):
-            log.error(f"Project directory was not created: {project_path}")
-            return False, "Project directory was not created after cloning"
+            # List what's actually in PROJECTS_BASE to debug
+            try:
+                contents = os.listdir(PROJECTS_BASE)
+                log.error(f"Project directory was not created at: {project_path}")
+                log.error(f"Contents of {PROJECTS_BASE}: {contents}")
+            except Exception as list_err:
+                log.error(f"Could not list {PROJECTS_BASE}: {list_err}")
+            return False, f"Project directory was not created at expected path: {project_path}"
 
         log.info(f"Cloned repository: {github_source} to {project_path}")
         return True, output
     except Exception as e:
-        log.error(f"Error cloning GitHub repo: {str(e)}")
+        log.error(f"Error cloning GitHub repo: {str(e)}", exc_info=True)
         return False, f"Error: {str(e)}"
 
 
@@ -216,6 +231,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Clone the repository
             await update.message.reply_text(
                 f"📥 Cloning repository: <code>{github_source}</code>\n"
+                f"Target: <code>{project_path}</code>\n"
                 f"Please wait..."
             )
 
@@ -227,16 +243,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"Please check:\n"
                     f"• Repository exists and is accessible\n"
                     f"• You have gh CLI installed and authenticated\n"
-                    f"• The repository name is correct"
+                    f"• The repository name is correct\n\n"
+                    f"Debug info:\n"
+                    f"• PROJECTS_BASE: <code>{PROJECTS_BASE}</code>\n"
+                    f"• IS_CONTAINER: <code>{os.getenv('CONTAINER', 'false')}</code>"
                 )
                 context.user_data.clear()
                 return
 
             # Verify directory exists after cloning
             if not os.path.exists(project_path):
+                # Show what directories DO exist
+                try:
+                    existing = os.listdir(PROJECTS_BASE)
+                    existing_str = ", ".join(existing) if existing else "(empty)"
+                except Exception as e:
+                    existing_str = f"Error listing: {e}"
+
                 await update.message.reply_text(
-                    f"❌ Error: Project directory was not created at {project_path}\n"
-                    f"Clone output: <code>{result}</code>"
+                    f"❌ Error: Project directory was not created at:\n"
+                    f"<code>{project_path}</code>\n\n"
+                    f"Existing directories in <code>{PROJECTS_BASE}</code>:\n"
+                    f"<code>{existing_str}</code>\n\n"
+                    f"Clone output:\n<code>{result}</code>"
                 )
                 context.user_data.clear()
                 return

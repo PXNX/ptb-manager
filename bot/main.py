@@ -449,6 +449,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # In your main bot file, find the redeploy button callback and replace it with:
 
 
+
         elif data.startswith('redeploy_'):
 
             service = data.replace('redeploy_', '')
@@ -501,17 +502,44 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 result_text += f"📥 Repository sync: Already up to date ✓\n\n"
 
-            # Step 2: For systemctl, provide instructions
+            # Step 2: Restart the service
 
             if IS_CONTAINER:
 
-                result_text += "⚠️ <b>Manual step required:</b>\n"
+                # Create a trigger file for the systemd path watcher
 
-                result_text += "Run this command on your host:\n\n"
+                trigger_dir = os.path.join(PROJECTS_BASE, '.triggers')
 
-                result_text += f"<code>systemctl --user restart {service}</code>\n\n"
+                os.makedirs(trigger_dir, exist_ok=True)
 
-                result_text += "The code has been updated and is ready to restart!"
+                import time
+
+                trigger_file = os.path.join(trigger_dir, f"restart-{service}-{int(time.time())}.trigger")
+
+                try:
+
+                    with open(trigger_file, 'w') as f:
+
+                        f.write(f"systemctl --user restart {service}\n")
+
+                    log.info(f"Created trigger file: {trigger_file}")
+
+                    result_text += "✅ Restart command queued via trigger file\n"
+
+                    result_text += f"🔄 The systemd path watcher will restart {service}\n\n"
+
+                    result_text += "The container should restart automatically in a few seconds!"
+
+
+                except Exception as e:
+
+                    log.error(f"Error creating trigger file: {e}")
+
+                    result_text += f"\n⚠️ Could not create trigger file: {e}\n\n"
+
+                    result_text += "Please run this command manually on your host:\n\n"
+
+                    result_text += f"<code>systemctl --user restart {service}</code>"
 
             else:
 

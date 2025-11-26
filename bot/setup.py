@@ -69,9 +69,13 @@ def create_env_file(project_name, env_content):
 
 
 def setup_and_start_project(project_name):
-    """Setup project with daemon reload and container start"""
+    """Setup project with gh repo sync, daemon reload, and container start"""
     try:
+        project_path = os.path.join(PROJECTS_BASE, project_name)
+
         steps = [
+            f"cd {QUADLETS_DIR}",  # Go to quadlets directory
+            "git pull",  # Pull latest changes (simpler than gh repo sync)
             "systemctl --user daemon-reload",
             f"systemctl --user start {project_name}"
         ]
@@ -80,7 +84,7 @@ def setup_and_start_project(project_name):
         output = run_command(full_cmd)
         return output
     except Exception as e:
-        log.error(f"Error setting up project: {str(e)}")
+        log.error(f"Error setting up project: {str(e)} - {project_path}")
         return f"Error: {str(e)}"
 
 

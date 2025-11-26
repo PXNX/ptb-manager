@@ -11,7 +11,7 @@ from telegram.ext import (
     ContextTypes, Defaults, MessageHandler, filters,
 )
 
-from config import TELEGRAM_TOKEN, PROJECTS_BASE, ALLOWED_USER_IDS, QUADLETS_DIR, PODMAN_URL
+from config import TELEGRAM_TOKEN, PROJECTS_BASE, ALLOWED_USER_IDS, QUADLETS_DIR, PODMAN_URL, IS_CONTAINER
 from database import dbbackup_command
 from logs import log
 from podman import restart_container, stop_container, start_container, redeploy_command, start_container_command, \
@@ -446,6 +446,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log.info(f"Container started: {container_id}")
             await query.edit_message_text(result_text, parse_mode=ParseMode.MARKDOWN)
 
+            # In your main bot file, find the redeploy button callback and replace it with:
+
         elif data.startswith('redeploy_'):
             service = data.replace('redeploy_', '')
             log.info(f"Redeploying service: {service}")
@@ -458,21 +460,33 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             project_path = os.path.join(PROJECTS_BASE, service)
 
-            # Execute redeploy steps (Linux/systemd only)
-            steps = [
+            # Step 1: Sync the project repository
+            sync_steps = [
                 f"cd {project_path}",
-                "gh repo sync",
-                f"systemctl --user restart {service}"
+                "gh repo sync"
             ]
+            sync_cmd = " && ".join(sync_steps)
+            sync_output = run_command(sync_cmd, timeout=60)
 
-            full_cmd = " && ".join(steps)
-            output = run_command(full_cmd)
+            result_text = f"✅ <b>Redeploy completed for {service}</b>\n\n"
+            result_text += f"📥 Repository sync:\n<code>{sync_output}</code>\n\n"
 
-            result_text = f"✅ *Redeploy completed for {service}*\n\n"
-            result_text += f"```\n{output}\n```"
+            # Step 2: For systemctl, provide instructions
+            if IS_CONTAINER:
+                result_text += "⚠️ <b>Manual step required:</b>\n"
+                result_text += "Run this command on your host:\n\n"
+                result_text += f"<code>systemctl --user restart {service}</code>\n\n"
+                result_text += "The code has been updated and is ready to restart!"
+
+            else:
+                # Running on host - execute normally
+                restart_cmd = f"systemctl --user restart {service}"
+                restart_output = run_command(restart_cmd, timeout=30)
+                result_text += f"🔄 Service restart:\n<code>{restart_output}</code>"
 
             log.info(f"Redeploy completed for {service}")
-            await query.edit_message_text(result_text, parse_mode='Markdown')
+
+            await query.edit_message_text(result_text)
 
         elif data == 'quadlets_reload':
             log.info("Reloading quadlets")

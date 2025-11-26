@@ -69,22 +69,20 @@ def create_env_file(project_name, env_content):
 
 
 def setup_and_start_project(project_name):
-    """Setup project with gh repo sync, daemon reload, and container start"""
+    """Setup project with quadlets sync, daemon reload and container start"""
     try:
-        project_path = os.path.join(PROJECTS_BASE, project_name)
-
         steps = [
-            f"cd {QUADLETS_DIR}",  # Go to quadlets directory
-            "git pull",  # Pull latest changes (simpler than gh repo sync)
+            f"cd {QUADLETS_DIR}",
+            "gh repo sync",
             "systemctl --user daemon-reload",
             f"systemctl --user start {project_name}"
         ]
 
         full_cmd = " && ".join(steps)
-        output = run_command(full_cmd)
+        output = run_command(full_cmd, timeout=60)  # Increased timeout for sync
         return output
     except Exception as e:
-        log.error(f"Error setting up project: {str(e)} - {project_path}")
+        log.error(f"Error setting up project: {str(e)}")
         return f"Error: {str(e)}"
 
 
@@ -319,8 +317,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"⏭ Skipped .env file creation.\n\n"
                     f"🚀 <b>Next Steps:</b>\n\n"
                     f"<b>Setup & Start Project</b> will:\n"
-                    f"1. Run systemctl --user daemon-reload\n"
-                    f"2. Start the container: systemctl --user start {project_name}\n\n"
+                    f"1. Sync quadlets from GitHub\n"
+                    f"2. Run systemctl --user daemon-reload\n"
+                    f"3. Start the container: systemctl --user start {project_name}\n\n"
                     f"Or choose 'Done' to set up manually later.",
                     reply_markup=reply_markup
                 )
@@ -349,8 +348,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"✅ .env file created: <code>{result}</code>\n\n"
                 f"🚀 <b>Next Steps:</b>\n\n"
                 f"<b>Setup & Start Project</b> will:\n"
-                f"1. Run systemctl --user daemon-reload\n"
-                f"2. Start the container: systemctl --user start {project_name}\n\n"
+                f"1. Sync quadlets from GitHub\n"
+                f"2. Run systemctl --user daemon-reload\n"
+                f"3. Start the container: systemctl --user start {project_name}\n\n"
                 f"Or choose 'Done' to set up manually later.",
                 reply_markup=reply_markup
             )

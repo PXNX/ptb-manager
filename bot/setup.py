@@ -71,8 +71,6 @@ def create_env_file(project_name, env_content):
 def setup_and_start_project(project_name):
     """Setup project with quadlets sync, daemon reload and container start"""
     try:
-
-
         # Step 1: Sync quadlets from GitHub
         sync_steps = [
             f"cd {QUADLETS_DIR}",
@@ -85,20 +83,31 @@ def setup_and_start_project(project_name):
             log.error(f"Error syncing quadlets: {sync_output}")
             return f"Error syncing quadlets:\n{sync_output}"
 
-        output = f"Quadlet sync completed:\n{sync_output}\n\n"
+        output = f"✅ Quadlet sync completed:\n{sync_output}\n\n"
 
-        # Step 2 & 3: Reload systemd and start service
+        # Step 2: For systemctl commands, we need to create a trigger file
+        # that the host can watch and act upon
         if IS_CONTAINER:
-            # When in container, use nsenter to run systemctl commands on the host
-            # as the configured host user
-            reload_cmd = f"nsenter -t 1 -m -u -n -i su - {HOST_USER} -c 'systemctl --user daemon-reload'"
-            start_cmd = f"nsenter -t 1 -m -u -n -i su - {HOST_USER} -c 'systemctl --user start {project_name}'"
+            # Create a trigger file that tells the host to reload and start
+            trigger_file = os.path.join(PROJECTS_BASE, '.systemctl-trigger')
+            try:
+                with open(trigger_file, 'w') as f:
+                    f.write(f"daemon-reload\n")
+                    f.write(f"start {project_name}\n")
 
-            full_systemctl_cmd = f"{reload_cmd} && {start_cmd}"
-            systemctl_output = run_command(full_systemctl_cmd, timeout=30)
+                output += "📝 Created trigger file for systemctl commands.\n\n"
+                output += "⚠️ <b>Manual step required:</b>\n"
+                output += "Run these commands on your host:\n\n"
+                output += f"<code>systemctl --user daemon-reload</code>\n"
+                output += f"<code>systemctl --user start {project_name}</code>\n\n"
+                output += "The quadlet has been synced and is ready to start!"
 
-            output += f"Systemd reload and service start:\n{systemctl_output}"
-            return output
+            except Exception as e:
+                log.error(f"Error creating trigger file: {e}")
+                output += f"\n⚠️ Could not create trigger file.\n\n"
+                output += "Please run these commands manually on your host:\n\n"
+                output += f"<code>systemctl --user daemon-reload</code>\n"
+                output += f"<code>systemctl --user start {project_name}</code>"
         else:
             # Running on host - execute normally
             systemctl_steps = [
@@ -108,12 +117,14 @@ def setup_and_start_project(project_name):
             systemctl_cmd = " && ".join(systemctl_steps)
             systemctl_output = run_command(systemctl_cmd, timeout=30)
 
-            output += f"Systemd reload and service start:\n{systemctl_output}"
-            return output
+            output += f"✅ Systemd reload and service start:\n{systemctl_output}"
+
+        return output
 
     except Exception as e:
         log.error(f"Error setting up project: {str(e)}")
         return f"Error: {str(e)}"
+
 
 @check_auth
 async def newproject_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -118,6 +118,47 @@ async def newproject_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
+def clone_github_repo(project_name, github_source=None):
+    """Clone GitHub repository into project directory"""
+    try:
+        project_path = os.path.join(PROJECTS_BASE, project_name)
+
+        # Check if directory already exists
+        if os.path.exists(project_path):
+            log.error(f"Project directory already exists: {project_path}")
+            return False, f"Project directory already exists: {project_name}"
+
+        # If no source provided, use default org
+        if not github_source:
+            github_source = f"{DEFAULT_GITHUB_ORG}/{project_name}"
+
+        # Construct GitHub URL if not already a full URL
+        if not github_source.startswith('http'):
+            repo_url = f"https://github.com/{github_source}.git"
+        else:
+            repo_url = github_source
+
+        # Clone the repository - gh repo clone automatically creates the directory
+        # We need to specify the target directory name
+        cmd = f"cd {PROJECTS_BASE} && gh repo clone {repo_url} {project_name}"
+        output = run_command(cmd)
+
+        if "fatal" in output.lower() or "error" in output.lower():
+            log.error(f"Error cloning repo: {output}")
+            return False, output
+
+        # Verify the directory was created
+        if not os.path.exists(project_path):
+            log.error(f"Project directory was not created: {project_path}")
+            return False, "Project directory was not created after cloning"
+
+        log.info(f"Cloned repository: {github_source} to {project_path}")
+        return True, output
+    except Exception as e:
+        log.error(f"Error cloning GitHub repo: {str(e)}")
+        return False, f"Error: {str(e)}"
+
+
 @check_auth
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle text messages for new project setup"""
@@ -176,7 +217,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 f"📥 Cloning repository: <code>{github_source}</code>\n"
                 f"Please wait..."
-
             )
 
             success, result = clone_github_repo(project_name, github_source)
@@ -188,7 +228,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"• Repository exists and is accessible\n"
                     f"• You have gh CLI installed and authenticated\n"
                     f"• The repository name is correct"
+                )
+                context.user_data.clear()
+                return
 
+            # Verify directory exists after cloning
+            if not os.path.exists(project_path):
+                await update.message.reply_text(
+                    f"❌ Error: Project directory was not created at {project_path}\n"
+                    f"Clone output: <code>{result}</code>"
                 )
                 context.user_data.clear()
                 return
@@ -210,13 +258,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"API_KEY=your_api_key\n"
                 f"DATABASE_URL=postgres://...</code>\n\n"
                 f"Or send 'skip' to skip creating a .env file."
-
             )
 
         # Check if we're waiting for env content
         elif context.user_data.get('awaiting_env_content'):
             project_name = context.user_data.get('project_name')
             env_content = update.message.text.strip()
+
+            # Verify project directory exists before creating .env
+            project_path = os.path.join(PROJECTS_BASE, project_name)
+            if not os.path.exists(project_path):
+                await update.message.reply_text(
+                    f"❌ Error: Project directory not found at {project_path}\n"
+                    f"Please start over with /newproject"
+                )
+                context.user_data.clear()
+                return
 
             if env_content.lower() == 'skip':
                 # Skip .env creation
@@ -238,7 +295,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"3. Start the container: systemctl --user start {project_name}\n\n"
                     f"Or choose 'Done' to set up manually later.",
                     reply_markup=reply_markup
-
                 )
                 return
 
@@ -270,7 +326,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"3. Start the container: systemctl --user start {project_name}\n\n"
                 f"Or choose 'Done' to set up manually later.",
                 reply_markup=reply_markup
-
             )
 
         else:

@@ -10,6 +10,7 @@ ALLOWED_USER_IDS = [int(uid) for uid in os.environ.get('ALLOWED_USER_IDS', '').s
 PODMAN_URL = os.getenv('PODMAN_URL', '')  # e.g., tcp://host.containers.internal:8888
 DEFAULT_GITHUB_ORG = os.getenv('DEFAULT_GITHUB_ORG', 'PXNX')
 PODMAN_CMD = os.getenv('PODMAN_CMD', '/usr/bin/podman')
+HOST_USER = os.getenv('HOST_USER', 'nyx')  # Username on the host system
 
 IS_CONTAINER = os.getenv('CONTAINER') == 'true' or os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv')
 PODMAN_SOCK = os.getenv('PODMAN_SOCK', '/run/podman/podman.sock')

@@ -3,7 +3,7 @@ import os
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
-from config import PROJECTS_BASE, QUADLETS_DIR, DEFAULT_GITHUB_ORG
+from config import PROJECTS_BASE, QUADLETS_DIR, DEFAULT_GITHUB_ORG, IS_CONTAINER, HOST_USER
 from logs import log
 from shell import run_command
 from util import check_auth
@@ -71,20 +71,49 @@ def create_env_file(project_name, env_content):
 def setup_and_start_project(project_name):
     """Setup project with quadlets sync, daemon reload and container start"""
     try:
-        steps = [
-            f"cd {QUADLETS_DIR}",
-            "gh repo sync",
-            "systemctl --user daemon-reload",
-            f"systemctl --user start {project_name}"
-        ]
 
-        full_cmd = " && ".join(steps)
-        output = run_command(full_cmd, timeout=60)  # Increased timeout for sync
-        return output
+
+        # Step 1: Sync quadlets from GitHub
+        sync_steps = [
+            f"cd {QUADLETS_DIR}",
+            "gh repo sync"
+        ]
+        sync_cmd = " && ".join(sync_steps)
+        sync_output = run_command(sync_cmd, timeout=60)
+
+        if "fatal" in sync_output.lower() or "error" in sync_output.lower():
+            log.error(f"Error syncing quadlets: {sync_output}")
+            return f"Error syncing quadlets:\n{sync_output}"
+
+        output = f"Quadlet sync completed:\n{sync_output}\n\n"
+
+        # Step 2 & 3: Reload systemd and start service
+        if IS_CONTAINER:
+            # When in container, use nsenter to run systemctl commands on the host
+            # as the configured host user
+            reload_cmd = f"nsenter -t 1 -m -u -n -i su - {HOST_USER} -c 'systemctl --user daemon-reload'"
+            start_cmd = f"nsenter -t 1 -m -u -n -i su - {HOST_USER} -c 'systemctl --user start {project_name}'"
+
+            full_systemctl_cmd = f"{reload_cmd} && {start_cmd}"
+            systemctl_output = run_command(full_systemctl_cmd, timeout=30)
+
+            output += f"Systemd reload and service start:\n{systemctl_output}"
+            return output
+        else:
+            # Running on host - execute normally
+            systemctl_steps = [
+                "systemctl --user daemon-reload",
+                f"systemctl --user start {project_name}"
+            ]
+            systemctl_cmd = " && ".join(systemctl_steps)
+            systemctl_output = run_command(systemctl_cmd, timeout=30)
+
+            output += f"Systemd reload and service start:\n{systemctl_output}"
+            return output
+
     except Exception as e:
         log.error(f"Error setting up project: {str(e)}")
         return f"Error: {str(e)}"
-
 
 @check_auth
 async def newproject_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

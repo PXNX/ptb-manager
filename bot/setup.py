@@ -69,13 +69,9 @@ def create_env_file(project_name, env_content):
 
 
 def setup_and_start_project(project_name):
-    """Setup project with gh repo sync, daemon reload, and container start"""
+    """Setup project with daemon reload and container start"""
     try:
-        project_path = os.path.join(PROJECTS_BASE, project_name)
-
         steps = [
-            f"cd {QUADLETS_DIR}",
-            "gh repo sync",
             "systemctl --user daemon-reload",
             f"systemctl --user start {project_name}"
         ]

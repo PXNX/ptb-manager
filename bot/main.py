@@ -448,41 +448,86 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             # In your main bot file, find the redeploy button callback and replace it with:
 
+
         elif data.startswith('redeploy_'):
+
             service = data.replace('redeploy_', '')
+
             log.info(f"Redeploying service: {service}")
 
             if not service:
                 await query.edit_message_text(f"❌ Project {service} not found")
+
                 return
 
             await query.edit_message_text(f"🔄 Redeploying {service}...")
 
             project_path = os.path.join(PROJECTS_BASE, service)
 
+            # Check if project directory exists
+
+            if not os.path.exists(project_path):
+                await query.edit_message_text(f"❌ Project directory not found: {project_path}")
+
+                return
+
             # Step 1: Sync the project repository
+
             sync_steps = [
+
                 f"cd {project_path}",
+
                 "gh repo sync"
+
             ]
+
             sync_cmd = " && ".join(sync_steps)
+
             sync_output = run_command(sync_cmd, timeout=60)
 
             result_text = f"✅ <b>Redeploy completed for {service}</b>\n\n"
-            result_text += f"📥 Repository sync:\n<code>{sync_output}</code>\n\n"
+
+            # Check if sync had errors
+
+            if "fatal" in sync_output.lower() or "error" in sync_output.lower():
+
+                result_text += f"❌ Repository sync failed:\n<code>{sync_output}</code>\n\n"
+
+            elif sync_output.strip():
+
+                result_text += f"📥 Repository sync:\n<code>{sync_output}</code>\n\n"
+
+            else:
+
+                result_text += f"📥 Repository sync: Already up to date ✓\n\n"
 
             # Step 2: For systemctl, provide instructions
+
             if IS_CONTAINER:
+
                 result_text += "⚠️ <b>Manual step required:</b>\n"
+
                 result_text += "Run this command on your host:\n\n"
+
                 result_text += f"<code>systemctl --user restart {service}</code>\n\n"
+
                 result_text += "The code has been updated and is ready to restart!"
 
             else:
+
                 # Running on host - execute normally
+
                 restart_cmd = f"systemctl --user restart {service}"
+
                 restart_output = run_command(restart_cmd, timeout=30)
-                result_text += f"🔄 Service restart:\n<code>{restart_output}</code>"
+
+                if restart_output.strip():
+
+                    result_text += f"🔄 Service restart:\n<code>{restart_output}</code>"
+
+                else:
+
+                    result_text += f"🔄 Service restart: Completed successfully ✓"
 
             log.info(f"Redeploy completed for {service}")
 

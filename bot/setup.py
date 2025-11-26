@@ -319,9 +319,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"⏭ Skipped .env file creation.\n\n"
                     f"🚀 <b>Next Steps:</b>\n\n"
                     f"<b>Setup & Start Project</b> will:\n"
-                    f"1. Run gh repo sync in quadlets directory\n"
-                    f"2. Run systemctl --user daemon-reload\n"
-                    f"3. Start the container: systemctl --user start {project_name}\n\n"
+                    f"1. Run systemctl --user daemon-reload\n"
+                    f"2. Start the container: systemctl --user start {project_name}\n\n"
                     f"Or choose 'Done' to set up manually later.",
                     reply_markup=reply_markup
                 )
@@ -350,9 +349,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"✅ .env file created: <code>{result}</code>\n\n"
                 f"🚀 <b>Next Steps:</b>\n\n"
                 f"<b>Setup & Start Project</b> will:\n"
-                f"1. Run gh repo sync in quadlets directory\n"
-                f"2. Run systemctl --user daemon-reload\n"
-                f"3. Start the container: systemctl --user start {project_name}\n\n"
+                f"1. Run systemctl --user daemon-reload\n"
+                f"2. Start the container: systemctl --user start {project_name}\n\n"
                 f"Or choose 'Done' to set up manually later.",
                 reply_markup=reply_markup
             )

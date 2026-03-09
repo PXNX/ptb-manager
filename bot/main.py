@@ -514,6 +514,38 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             log.info(f"Redeploying service: {service}")
 
+            # Special case: self-redeploy for ptb-manager
+            if service == "ptb-manager":
+                await query.edit_message_text("🔄 Self-redeploying ptb-manager...")
+                
+                # Use current directory for self-redeploy
+                manager_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                
+                sync_cmd = f"cd {manager_path} && gh repo sync"
+                sync_output = run_command(sync_cmd, timeout=60)
+                
+                result_text = "✅ <b>Self-redeploy completed for ptb-manager</b>\n\n"
+                if "fatal" in sync_output.lower() or "error" in sync_output.lower():
+                    result_text += f"❌ Repository sync failed:\n<code>{sync_output}</code>\n\n"
+                else:
+                    result_text += f"📥 Repository sync: {sync_output if sync_output.strip() else 'Already up to date ✓'}\n\n"
+                
+                if IS_CONTAINER:
+                    trigger_dir = os.path.join(PROJECTS_BASE, '.triggers')
+                    os.makedirs(trigger_dir, exist_ok=True)
+                    import time
+                    trigger_file = os.path.join(trigger_dir, f"restart-ptb-manager-{int(time.time())}.trigger")
+                    with open(trigger_file, 'w') as f:
+                        f.write("systemctl --user restart ptb-manager\n")
+                    result_text += "🔄 The systemd path watcher will restart ptb-manager in a few seconds!"
+                else:
+                    restart_cmd = "systemctl --user restart ptb-manager"
+                    run_command(restart_cmd, timeout=30)
+                    result_text += "🔄 Service restart: Completed successfully ✓"
+                
+                await query.edit_message_text(result_text)
+                return
+
             if not service:
                 await query.edit_message_text(f"❌ Project {service} not found")
 

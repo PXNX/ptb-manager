@@ -536,7 +536,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     result_text += f"📥 Repository sync: {sync_output if sync_output.strip() else 'Already up to date ✓'}\n\n"
                 
-                # Prepare rollback script/trigger
+                # Prepare rollback and log-reporting script/trigger
+                user_id = query.from_user.id
                 if IS_CONTAINER:
                     trigger_dir = os.path.join(PROJECTS_BASE, '.triggers')
                     os.makedirs(trigger_dir, exist_ok=True)
@@ -547,23 +548,27 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     with open(restart_trigger, 'w') as f:
                         f.write("systemctl --user restart ptb-manager\n")
                     
-                    # Create a delayed rollback trigger (executes in 2 minutes)
-                    # This relies on the host having a mechanism to handle delayed triggers or we use a clever hack
-                    # For now, we'll document that we've initiated the restart.
-                    # A true automated rollback would need a separate watchdog process on the host.
-                    
                     result_text += "🔄 The systemd path watcher will restart ptb-manager in a few seconds!\n\n"
                     result_text += f"🛡️ <b>Rollback info:</b> If it fails, run this on host:\n"
                     result_text += f"<code>cd {manager_path} && git reset --hard {current_commit} && systemctl --user restart ptb-manager</code>"
                 else:
-                    # On host, we can actually schedule a rollback
-                    rollback_cmd = f"sleep 120 && systemctl --user is-active --quiet ptb-manager || (cd {manager_path} && git reset --hard {current_commit} && systemctl --user restart ptb-manager)"
+                    # On host, we can schedule a rollback AND a log report
+                    # We use a python one-liner to send the message if it fails
+                    report_cmd = (
+                        f"sleep 60 && systemctl --user is-active --quiet ptb-manager || ("
+                        f"LOGS=$(systemctl --user status ptb-manager | head -n 50); "
+                        f"python3 -c \"import asyncio; from telegram import Bot; "
+                        f"async def main(): bot = Bot('{TELEGRAM_TOKEN}'); "
+                        f"await bot.send_message({user_id}, '❌ <b>ptb-manager failed to start!</b>\\n\\nLogs:\\n<code>' + '$LOGS' + '</code>', parse_mode='HTML'); "
+                        f"asyncio.run(main())\"; "
+                        f"cd {manager_path} && git reset --hard {current_commit} && systemctl --user restart ptb-manager)"
+                    )
                     import subprocess
-                    subprocess.Popen(["sh", "-c", rollback_cmd], start_new_session=True)
+                    subprocess.Popen(["sh", "-c", report_cmd], start_new_session=True)
                     
                     restart_cmd = "systemctl --user restart ptb-manager"
                     run_command(restart_cmd, timeout=30)
-                    result_text += "🔄 Service restart initiated. Rollback scheduled in 2 minutes if it fails to start."
+                    result_text += "🔄 Service restart initiated. If it fails, you will receive the logs and a rollback will occur in 1 minute."
                 
                 await query.edit_message_text(result_text)
                 return

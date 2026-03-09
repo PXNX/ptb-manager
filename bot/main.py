@@ -516,32 +516,54 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             # Special case: self-redeploy for ptb-manager
             if service == "ptb-manager":
-                await query.edit_message_text("🔄 Self-redeploying ptb-manager...")
+                await query.edit_message_text("🔄 Safe self-redeploying ptb-manager...")
                 
                 # Use current directory for self-redeploy
                 manager_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 
+                # Get current commit hash for potential rollback
+                current_commit = run_command(f"cd {manager_path} && git rev-parse HEAD").strip()
+                log.info(f"Current commit for ptb-manager: {current_commit}")
+                
                 sync_cmd = f"cd {manager_path} && gh repo sync"
                 sync_output = run_command(sync_cmd, timeout=60)
                 
-                result_text = "✅ <b>Self-redeploy completed for ptb-manager</b>\n\n"
+                result_text = "✅ <b>Safe self-redeploy initiated for ptb-manager</b>\n\n"
                 if "fatal" in sync_output.lower() or "error" in sync_output.lower():
                     result_text += f"❌ Repository sync failed:\n<code>{sync_output}</code>\n\n"
+                    await query.edit_message_text(result_text)
+                    return
                 else:
                     result_text += f"📥 Repository sync: {sync_output if sync_output.strip() else 'Already up to date ✓'}\n\n"
                 
+                # Prepare rollback script/trigger
                 if IS_CONTAINER:
                     trigger_dir = os.path.join(PROJECTS_BASE, '.triggers')
                     os.makedirs(trigger_dir, exist_ok=True)
                     import time
-                    trigger_file = os.path.join(trigger_dir, f"restart-ptb-manager-{int(time.time())}.trigger")
-                    with open(trigger_file, 'w') as f:
+                    
+                    # Create the main restart trigger
+                    restart_trigger = os.path.join(trigger_dir, f"restart-ptb-manager-{int(time.time())}.trigger")
+                    with open(restart_trigger, 'w') as f:
                         f.write("systemctl --user restart ptb-manager\n")
-                    result_text += "🔄 The systemd path watcher will restart ptb-manager in a few seconds!"
+                    
+                    # Create a delayed rollback trigger (executes in 2 minutes)
+                    # This relies on the host having a mechanism to handle delayed triggers or we use a clever hack
+                    # For now, we'll document that we've initiated the restart.
+                    # A true automated rollback would need a separate watchdog process on the host.
+                    
+                    result_text += "🔄 The systemd path watcher will restart ptb-manager in a few seconds!\n\n"
+                    result_text += f"🛡️ <b>Rollback info:</b> If it fails, run this on host:\n"
+                    result_text += f"<code>cd {manager_path} && git reset --hard {current_commit} && systemctl --user restart ptb-manager</code>"
                 else:
+                    # On host, we can actually schedule a rollback
+                    rollback_cmd = f"sleep 120 && systemctl --user is-active --quiet ptb-manager || (cd {manager_path} && git reset --hard {current_commit} && systemctl --user restart ptb-manager)"
+                    import subprocess
+                    subprocess.Popen(["sh", "-c", rollback_cmd], start_new_session=True)
+                    
                     restart_cmd = "systemctl --user restart ptb-manager"
                     run_command(restart_cmd, timeout=30)
-                    result_text += "🔄 Service restart: Completed successfully ✓"
+                    result_text += "🔄 Service restart initiated. Rollback scheduled in 2 minutes if it fails to start."
                 
                 await query.edit_message_text(result_text)
                 return

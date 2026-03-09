@@ -53,6 +53,8 @@ Available commands:
 
 /newproject - Setup a new project (Linux only)
 
+/status - Show systemd user status (Linux only)
+
 /help - Show this message"""
     await update.message.reply_text(welcome_text)
 
@@ -73,6 +75,40 @@ def get_full_container_logs_since(container_id, since='24h'):
     """Get logs from a specific container since a time period"""
     cmd = f"podman logs --since {since} {container_id}"
     return run_command(cmd, timeout=120)  # 2 minutes timeout
+
+
+@check_auth
+@check_auth
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show systemd user status menu"""
+    try:
+        if os.name == 'nt':
+            await update.message.reply_text("❌ Status is not supported on Windows.")
+            return
+
+        containers = get_podman_containers()
+
+        if not containers:
+            await update.message.reply_text("No containers found.")
+            return
+
+        keyboard = []
+        for c in containers:
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"📊 {c['name']} Status",
+                    callback_data=f"status_{c['name']}"
+                )
+            ])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            "Select a service to view its systemd status:",
+            reply_markup=reply_markup
+        )
+    except Exception as e:
+        log.error(f"Error in status_command: {str(e)}", exc_info=True)
+        await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
 @check_auth
@@ -180,7 +216,29 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     try:
-        if data.startswith('logs_'):
+        if data.startswith('status_'):
+            service_name = data.replace('status_', '')
+            log.info(f"Fetching systemd status for service: {service_name}")
+
+            await query.edit_message_text(f"📥 Fetching status for {service_name}... ⏳")
+
+            cmd = f"systemctl --user status {service_name}"
+            status_output = run_command(cmd, timeout=30)
+
+            # Escape special characters for Markdown
+            safe_service_name = service_name.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+
+            # Split status if too long
+            max_length = 4000
+            if len(status_output) > max_length:
+                status_output = status_output[:max_length] + "\n... (truncated)"
+
+            await query.edit_message_text(
+                f"📊 *Systemd Status for {safe_service_name}*\n\n```\n{status_output}\n```",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+        elif data.startswith('logs_'):
             container_id = data.replace('logs_', '')
             log.info(f"Fetching logs for container: {container_id}")
 
@@ -714,6 +772,7 @@ def main():
     application.add_handler(CommandHandler("envfiles", envfiles_command))
     application.add_handler(CommandHandler("dbbackup", dbbackup_command))
     application.add_handler(CommandHandler("newproject", newproject_command))
+    application.add_handler(CommandHandler("status", status_command))
 
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 

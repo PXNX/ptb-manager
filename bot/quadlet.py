@@ -35,16 +35,23 @@ def get_quadlet_files():
         return []
 
 
+def update_quadlets_repo():
+    """Sync quadlets repository from GitHub"""
+    try:
+        cmd = f"cd {QUADLETS_DIR} && gh repo sync"
+        output = run_command(cmd, timeout=60)
+        return output
+    except Exception as e:
+        log.error(f"Error updating quadlets repo: {str(e)}")
+        return f"Error: {str(e)}"
+
+
 def reload_systemd_quadlets():
     """Reload systemd daemon after quadlet changes"""
     try:
-        steps = [
-            f"cd {QUADLETS_DIR}",
-            "gh repo sync",
-            "systemctl --user daemon-reload"
-        ]
-        full_cmd = " && ".join(steps)
-        output = run_command(full_cmd)
+        # We don't do 'gh repo sync' here anymore as it's a separate step now
+        cmd = "systemctl --user daemon-reload"
+        output = run_command(cmd)
         return output
     except Exception as e:
         log.error(f"Error reloading quadlets: {str(e)}")
@@ -62,7 +69,8 @@ async def quadlets_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         keyboard = [
-            [InlineKeyboardButton("🔄 Reload Quadlets", callback_data="quadlets_reload")],
+            [InlineKeyboardButton("📥 Update from GitHub", callback_data="quadlets_update")],
+            [InlineKeyboardButton("🔄 Reload Systemd", callback_data="quadlets_reload")],
             [InlineKeyboardButton("📋 List Quadlet Files", callback_data="quadlets_list")]
         ]
 

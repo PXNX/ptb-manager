@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from io import BytesIO
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, BotCommandScopeChat
 from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
@@ -16,7 +16,7 @@ from database import dbbackup_command
 from logs import log
 from podman import restart_container, stop_container, start_container, redeploy_command, start_container_command, \
     stop_command, restart_command, get_podman_containers, containers_command
-from quadlet import reload_systemd_quadlets, get_quadlet_files, quadlets_command
+from quadlet import reload_systemd_quadlets, update_quadlets_repo, get_quadlet_files, quadlets_command
 from setup import setup_and_start_project, newproject_command, handle_message
 from shell import run_command
 from stats import stats_command
@@ -651,13 +651,28 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await query.edit_message_text(result_text)
 
+        elif data == 'quadlets_update':
+            log.info("Updating quadlets from GitHub")
+            await query.edit_message_text("📥 Syncing quadlets repository from GitHub...")
+
+            output = update_quadlets_repo()
+
+            result_text = "✅ *Quadlets Repository Updated*\n\n"
+            if output.strip():
+                result_text += f"```\n{output}\n```"
+            else:
+                result_text += "Already up to date ✓"
+
+            log.info("Quadlets updated")
+            await query.edit_message_text(result_text, parse_mode='Markdown')
+
         elif data == 'quadlets_reload':
             log.info("Reloading quadlets")
-            await query.edit_message_text("🔄 Reloading quadlets and systemd daemon...")
+            await query.edit_message_text("🔄 Reloading systemd daemon...")
 
             output = reload_systemd_quadlets()
 
-            result_text = "✅ *Quadlets reloaded successfully*\n\n"
+            result_text = "✅ *Systemd reloaded successfully*\n\n"
             result_text += f"```\n{output}\n```"
 
             log.info("Quadlets reloaded")
@@ -815,6 +830,44 @@ def main():
     # Error handler
     application.add_error_handler(error_handler)
 
+    async def post_init(application: Application) -> None:
+        """Set bot commands for admins after startup"""
+        commands = [
+            BotCommand("start", "Start the bot"),
+            BotCommand("containers", "List all containers"),
+            BotCommand("stats", "Show system resources"),
+            BotCommand("logs", "Get container logs"),
+            BotCommand("status", "Show systemd user status"),
+            BotCommand("restart", "Restart a container"),
+            BotCommand("stop", "Stop a container"),
+            BotCommand("start_container", "Start a container"),
+            BotCommand("redeploy", "Redeploy a project"),
+            BotCommand("quadlets", "Manage quadlet files"),
+            BotCommand("envfiles", "View project .env files"),
+            BotCommand("dbbackup", "Backup PostgreSQL database"),
+            BotCommand("newproject", "Setup a new project"),
+            BotCommand("help", "Show help message"),
+        ]
+        for admin_id in ALLOWED_USER_IDS:
+            try:
+                await application.bot.set_my_commands(
+                    commands, 
+                    scope=BotCommandScopeChat(chat_id=admin_id)
+                )
+                log.info(f"Set commands for admin: {admin_id}")
+            except Exception as e:
+                log.error(f"Failed to set commands for admin {admin_id}: {e}")
+
+    log.info("Starting Podman Monitoring Bot...")
+    log.info(f"Allowed user IDs: {ALLOWED_USER_IDS}")
+    log.info(f"Operating System: {os.name}")
+    if PODMAN_URL:
+        log.info(f"Podman URL: {PODMAN_URL}")
+
+    defaults = Defaults(parse_mode=ParseMode.HTML)
+    application = Application.builder().token(TELEGRAM_TOKEN).defaults(defaults).post_init(post_init).build()
+
+    # Command handlers
     try:
         application.run_polling(allowed_updates=Update.ALL_TYPES)
     except KeyboardInterrupt:

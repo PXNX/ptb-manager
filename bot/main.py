@@ -521,6 +521,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Use current directory for self-redeploy
                 manager_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 
+                # In container, the .git directory might be in the host projects directory
+                # but we should check where we actually are.
+                if IS_CONTAINER:
+                    # If we are in a container, PROJECTS_BASE/ptb-manager should be the git repo
+                    manager_path = os.path.join(PROJECTS_BASE, "ptb-manager")
+
+                log.info(f"Self-redeploy path: {manager_path}")
+                
                 # Get current commit hash for potential rollback
                 current_commit = run_command(f"cd {manager_path} && git rev-parse HEAD").strip()
                 log.info(f"Current commit for ptb-manager: {current_commit}")
@@ -531,6 +539,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 result_text = "✅ <b>Safe self-redeploy initiated for ptb-manager</b>\n\n"
                 if "fatal" in sync_output.lower() or "error" in sync_output.lower():
                     result_text += f"❌ Repository sync failed:\n<code>{sync_output}</code>\n\n"
+                    result_text += f"<i>Path: {manager_path}</i>"
                     await query.edit_message_text(result_text)
                     return
                 else:

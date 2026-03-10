@@ -829,34 +829,6 @@ def main():
     if PODMAN_URL:
         log.info(f"Podman URL: {PODMAN_URL}")
 
-    defaults = Defaults(parse_mode=ParseMode.HTML)
-    application = Application.builder().token(TELEGRAM_TOKEN).defaults(defaults).build()
-
-    # Command handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", start))
-    application.add_handler(CommandHandler("containers", containers_command))
-    application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(CommandHandler("logs", logs_command))
-    application.add_handler(CommandHandler("restart", restart_command))
-    application.add_handler(CommandHandler("stop", stop_command))
-    application.add_handler(CommandHandler("start", start_container_command))
-    application.add_handler(CommandHandler("redeploy", redeploy_command))
-    application.add_handler(CommandHandler("quadlets", quadlets_command))
-    application.add_handler(CommandHandler("envfiles", envfiles_command))
-    application.add_handler(CommandHandler("dbbackup", dbbackup_command))
-    application.add_handler(CommandHandler("newproject", newproject_command))
-    application.add_handler(CommandHandler("status", status_command))
-
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-
-    # Callback handler
-    application.add_handler(CallbackQueryHandler(button_callback))
-
-    # Error handler
-    application.add_error_handler(error_handler)
-
     async def post_init(application: Application) -> None:
         """Set bot commands for admins after startup"""
         commands = [
@@ -895,6 +867,29 @@ def main():
     application = Application.builder().token(TELEGRAM_TOKEN).defaults(defaults).post_init(post_init).build()
 
     # Command handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", start))
+    application.add_handler(CommandHandler("containers", containers_command))
+    application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("logs", logs_command))
+    application.add_handler(CommandHandler("restart", restart_command))
+    application.add_handler(CommandHandler("stop", stop_command))
+    application.add_handler(CommandHandler("start", start_container_command))
+    application.add_handler(CommandHandler("redeploy", redeploy_command))
+    application.add_handler(CommandHandler("quadlets", quadlets_command))
+    application.add_handler(CommandHandler("envfiles", envfiles_command))
+    application.add_handler(CommandHandler("dbbackup", dbbackup_command))
+    application.add_handler(CommandHandler("newproject", newproject_command))
+    application.add_handler(CommandHandler("status", status_command))
+
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # Callback handler
+    application.add_handler(CallbackQueryHandler(button_callback))
+
+    # Error handler
+    application.add_error_handler(error_handler)
+
     try:
         application.run_polling(allowed_updates=Update.ALL_TYPES)
     except KeyboardInterrupt:

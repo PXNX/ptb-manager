@@ -215,8 +215,30 @@ def clone_github_repo(project_name, github_source=None):
 
 @check_auth
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle text messages for new project setup"""
+    """Handle text messages for new project setup and .env editing"""
     try:
+        # Check if we're editing an existing .env file
+        if context.user_data.get('editing_env_project'):
+            project_name = context.user_data.get('editing_env_project')
+            new_content = update.message.text.strip()
+
+            if new_content.lower() == 'cancel':
+                context.user_data.pop('editing_env_project', None)
+                await update.message.reply_text("❌ Edit cancelled.")
+                return
+
+            success, result = create_env_file(project_name, new_content)
+            
+            if success:
+                context.user_data.pop('editing_env_project', None)
+                await update.message.reply_text(
+                    f"✅ .env file for <code>{project_name}</code> updated successfully!\n\n"
+                    f"You might need to /restart the container for changes to take effect."
+                )
+            else:
+                await update.message.reply_text(f"❌ Failed to update .env file: {result}")
+            return
+
         # Check if we're waiting for GitHub source
         if context.user_data.get('awaiting_github_source'):
             user_input = update.message.text.strip()

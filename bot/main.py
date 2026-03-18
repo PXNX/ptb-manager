@@ -778,8 +778,27 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Warning message about sensitive data
             warning = "⚠️ *Sensitive Data Warning*\n\n"
 
+            keyboard = [[InlineKeyboardButton("✏️ Edit", callback_data=f"editenv_{project}")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
             await query.edit_message_text(
                 f"{warning}📄 *.env file for {safe_project}*\n\n```\n{content}\n```",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=reply_markup
+            )
+
+        elif data.startswith('editenv_'):
+            project = data.replace('editenv_', '')
+            log.info(f"Starting edit for .env file: {project}")
+
+            context.user_data['editing_env_project'] = project
+            
+            safe_project = project.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+            
+            await query.edit_message_text(
+                f"📝 *Editing .env for {safe_project}*\n\n"
+                f"Please send the new content for the .env file now.\n"
+                f"Send 'cancel' to abort.",
                 parse_mode=ParseMode.MARKDOWN
             )
 
@@ -852,6 +871,7 @@ def main():
             BotCommand("redeploy", "Redeploy a project"),
             BotCommand("quadlets", "Manage quadlet files"),
             BotCommand("envfiles", "View project .env files"),
+            BotCommand("envfile", "View project .env files"),
             BotCommand("dbbackup", "Backup PostgreSQL database"),
             BotCommand("newproject", "Setup a new project"),
             BotCommand("help", "Show help message"),
@@ -887,6 +907,7 @@ def main():
     application.add_handler(CommandHandler("redeploy", redeploy_command))
     application.add_handler(CommandHandler("quadlets", quadlets_command))
     application.add_handler(CommandHandler("envfiles", envfiles_command))
+    application.add_handler(CommandHandler("envfile", envfiles_command))
     application.add_handler(CommandHandler("dbbackup", dbbackup_command))
     application.add_handler(CommandHandler("newproject", newproject_command))
     application.add_handler(CommandHandler("status", status_command))

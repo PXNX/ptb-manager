@@ -7,6 +7,7 @@ from config import PROJECTS_BASE, QUADLETS_DIR, DEFAULT_GITHUB_ORG, IS_CONTAINER
 from logs import log
 from shell import run_command
 from util import check_auth
+from template import generate_project_files
 
 
 def clone_github_repo(project_name, github_source=None):
@@ -308,24 +309,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data.clear()
                 return
 
-            # Store project name and move to next step
+             # Store project name and move to next step
             context.user_data['project_name'] = project_name
             context.user_data['github_source'] = github_source
             context.user_data['awaiting_github_source'] = False
+            
+            # Generate templates
+            github_org = github_source.split('/')[0] if '/' in github_source else DEFAULT_GITHUB_ORG
+            success, quadlet_content = generate_project_files(project_path, project_name, github_org)
+            
+            if success:
+                context.user_data['quadlet_content'] = quadlet_content
+                await update.message.reply_text(
+                    f"✅ Repository cloned successfully!\n"
+                    f"🐳 <b>Dockerfile</b> created automatically.\n\n"
+                    f"📁 Project: <code>{project_name}</code>\n"
+                    f"📦 Source: <code>{github_source}</code>\n"
+                    f"📂 Path: <code>{project_path}</code>\n\n"
+                    f"📝 Now send the contents of the .env file.\n"
+                    f"Or send 'skip' to skip creating a .env file."
+                )
+            else:
+                await update.message.reply_text(
+                    f"✅ Repository cloned successfully!\n"
+                    f"⚠️ <b>Note:</b> Could not generate Dockerfile automatically: {quadlet_content}\n\n"
+                    f"📝 Now send the contents of the .env file."
+                )
+            
             context.user_data['awaiting_env_content'] = True
-
-            await update.message.reply_text(
-                f"✅ Repository cloned successfully!\n\n"
-                f"📁 Project: <code>{project_name}</code>\n"
-                f"📦 Source: <code>{github_source}</code>\n"
-                f"📂 Path: <code>{project_path}</code>\n\n"
-                f"📝 Now send the contents of the .env file.\n"
-                f"Send each environment variable on a new line, for example:\n\n"
-                f"<code>TELEGRAM_TOKEN=your_token_here\n"
-                f"API_KEY=your_api_key\n"
-                f"DATABASE_URL=postgres://...</code>\n\n"
-                f"Or send 'skip' to skip creating a .env file."
-            )
 
         # Check if we're waiting for env content
         elif context.user_data.get('awaiting_env_content'):
@@ -377,23 +388,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['awaiting_env_content'] = False
 
             # Show next steps menu
+            quadlet_content = context.user_data.get('quadlet_content', '')
+            
+            msg = f"✅ .env file created: <code>{result}</code>\n\n"
+            if quadlet_content:
+                msg += f"📋 <b>Suggested Quadlet File:</b>\n"
+                msg += f"<code>{project_name}.container</code>\n"
+                msg += f"<pre>{quadlet_content}</pre>\n\n"
+                msg += f"⚠️ <b>Action Required:</b> Add this file to your <code>quadlets</code> repository.\n\n"
+            
+            msg += f"🚀 <b>Next Steps:</b>\n\n"
+            msg += f"<b>Setup & Start Project</b> will:\n"
+            msg += f"1. Sync quadlets from GitHub\n"
+            msg += f"2. Run systemctl --user daemon-reload\n"
+            msg += f"3. Start the container: systemctl --user start {project_name}\n\n"
+            msg += f"Or choose 'Done' to set up manually later."
+
             keyboard = [
                 [InlineKeyboardButton("🔄 Setup & Start Project", callback_data=f"setup_{project_name}")],
                 [InlineKeyboardButton("✅ Done (Manual Setup)", callback_data="setup_done")]
             ]
-
             reply_markup = InlineKeyboardMarkup(keyboard)
-
-            await update.message.reply_text(
-                f"✅ .env file created: <code>{result}</code>\n\n"
-                f"🚀 <b>Next Steps:</b>\n\n"
-                f"<b>Setup & Start Project</b> will:\n"
-                f"1. Sync quadlets from GitHub\n"
-                f"2. Run systemctl --user daemon-reload\n"
-                f"3. Start the container: systemctl --user start {project_name}\n\n"
-                f"Or choose 'Done' to set up manually later.",
-                reply_markup=reply_markup
-            )
+            await update.message.reply_text(msg, reply_markup=reply_markup)
 
         else:
             # No active wizard, ignore message

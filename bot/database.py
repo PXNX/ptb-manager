@@ -18,10 +18,26 @@ def backup_postgres_database(container_name='pg', db_user='postgres'):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_filename = f"{container_name}_backup_{timestamp}.sql"
 
-        # Create backup using pg_dumpall
-        # We use -U to specify the user, defaults to postgres
-        cmd = f"podman exec {container_name} pg_dumpall -U {db_user}"
-        backup_data = run_command(cmd, timeout=300) # Increased timeout for large DBs
+        # Check if we have a DATABASE_URL for this container in environment
+        # Map container names to env var names
+        env_map = {
+            'ptb-mn': 'DATABASE_URL',
+            'ptb-nn': 'DATABASE_URL_NN'
+        }
+        
+        db_url = os.environ.get(env_map.get(container_name, ''))
+        
+        if db_url:
+            log.info(f"Using DATABASE_URL for external backup of {container_name}")
+            # Use pg_dump for external database
+            # We use --no-owner and --no-privileges to make it more portable
+            cmd = f"pg_dump \"{db_url}\" --no-owner --no-privileges"
+            backup_data = run_command(cmd, timeout=300)
+        else:
+            # Fallback to podman exec for local containers
+            log.info(f"Using podman exec for local backup of {container_name}")
+            cmd = f"podman exec {container_name} pg_dumpall -U {db_user}"
+            backup_data = run_command(cmd, timeout=300)
 
         if backup_data and not any(x in backup_data.lower() for x in ["error", "failed", "denied", "not found"]):
             return backup_data, backup_filename
@@ -42,6 +58,14 @@ async def dbbackup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Filter for containers that might be databases (containing 'pg', 'db', 'postgres')
         db_containers = [c for c in containers if any(x in c['name'].lower() for x in ['pg', 'db', 'postgres'])]
         
+        # Always add ptb-mn and ptb-nn if they are not in the list (since they are external)
+        known_external = ['ptb-mn', 'ptb-nn']
+        existing_names = [c['name'] for c in containers]
+        
+        for ext in known_external:
+            if ext not in existing_names:
+                db_containers.append({'name': ext, 'id': 'external', 'status': 'External'})
+
         if not db_containers:
             # Fallback to show all containers if no obvious DB found
             db_containers = containers
@@ -61,7 +85,7 @@ async def dbbackup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(
-            "Select a container to backup its PostgreSQL database:",
+            "Select a container or database to backup:",
             reply_markup=reply_markup
         )
     except Exception as e:
@@ -93,11 +117,9 @@ async def handle_db_backup(query, container_name):
             )
             await query.edit_message_text(f"✅ Backup for {container_name} completed!")
         else:
-            # If backup_postgres_database returns None, it means it failed
-            # We should have logged the error in backup_postgres_database
             await query.edit_message_text(
                 f"❌ Failed to create backup for {container_name}.\n"
-                f"Possible reasons: container not running, wrong DB user, or pg_dumpall not available.")
+                f"Possible reasons: external DB unreachable, container not running, or pg_dump not available.")
     except Exception as e:
         log.error(f"Error in handle_db_backup: {str(e)}", exc_info=True)
         await query.edit_message_text(f"❌ Error: {str(e)}")
@@ -105,8 +127,6 @@ async def handle_db_backup(query, container_name):
 
 async def handle_db_upload(query, container_name):
     """Upload database dump to a remote destination (e.g. via gh or s3)"""
-    # This is a placeholder for actual upload logic
-    # For now, we can implement an upload to a GitHub gist or similar if gh is configured
     try:
         await query.edit_message_text(f"🚀 Preparing upload for {container_name}... ⏳")
         

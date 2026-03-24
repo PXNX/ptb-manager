@@ -12,7 +12,7 @@ from telegram.ext import (
 )
 
 from config import TELEGRAM_TOKEN, PROJECTS_BASE, ALLOWED_USER_IDS, QUADLETS_DIR, PODMAN_URL, IS_CONTAINER
-from database import dbbackup_command
+from database import dbbackup_command, handle_db_backup, handle_db_upload
 from logs import log
 from podman import restart_container, stop_container, start_container, redeploy_command, start_container_command, \
     stop_command, restart_command, get_podman_containers, containers_command
@@ -270,6 +270,36 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📄 *Logs for {safe_container_name}* (last 100 lines)\n\n```\n{logs}\n```",
                 parse_mode=ParseMode.MARKDOWN
             )
+
+        elif data.startswith('dbbackup_'):
+            container_name = data.replace('dbbackup_', '')
+            log.info(f"Showing backup options for: {container_name}")
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("💾 Download SQL Dump", callback_data=f"dbdump_{container_name}"),
+                    InlineKeyboardButton("📤 Upload to GitHub Gist", callback_data=f"dbupload_{container_name}")
+                ],
+                [InlineKeyboardButton("⬅️ Back", callback_data="dbbackup_list")]
+            ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                f"Select an action for database: {container_name}",
+                reply_markup=reply_markup
+            )
+            
+        elif data == 'dbbackup_list':
+            # Re-trigger the list command
+            await dbbackup_command(update, context)
+
+        elif data.startswith('dbdump_'):
+            container_name = data.replace('dbdump_', '')
+            await handle_db_backup(query, container_name)
+            
+        elif data.startswith('dbupload_'):
+            container_name = data.replace('dbupload_', '')
+            await handle_db_upload(query, container_name)
 
         elif data.startswith('dlogs_'):
             container_id = data.replace('dlogs_', '')

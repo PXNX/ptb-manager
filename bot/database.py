@@ -5,7 +5,7 @@ from io import BytesIO
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from config import log
+from logs import log
 from shell import run_command
 from util import check_auth
 from podman import get_podman_containers

@@ -29,24 +29,36 @@ def backup_postgres_database(container_name='pg', db_user='postgres'):
         
         if db_url:
             log.info(f"Using DATABASE_URL for external backup of {container_name}")
-            # Use pg_dump for external database
-            # We use --no-owner and --no-privileges to make it more portable
+            # Use pg_dump directly from the host system for external databases
+            # This avoids the need for pg_dump inside the container
             cmd = f"pg_dump \"{db_url}\" --no-owner --no-privileges"
             backup_data = run_command(cmd, timeout=300)
+            
+            # Check if pg_dump command was not found on host
+            if "not found" in backup_data.lower() or "no such file" in backup_data.lower():
+                log.error(f"pg_dump not found on host system: {backup_data}")
+                return f"ERROR: pg_dump is not installed on the host system. Please install it with 'sudo apt install postgresql-client'.", None
         else:
             # Fallback to podman exec for local containers
             log.info(f"Using podman exec for local backup of {container_name}")
+            # We try pg_dumpall first, then pg_dump as fallback
             cmd = f"podman exec {container_name} pg_dumpall -U {db_user}"
             backup_data = run_command(cmd, timeout=300)
+            
+            if "not found" in backup_data.lower() or "no such file" in backup_data.lower():
+                log.info(f"pg_dumpall not found in container {container_name}, trying pg_dump...")
+                cmd = f"podman exec {container_name} pg_dump -U {db_user}"
+                backup_data = run_command(cmd, timeout=300)
 
-        if backup_data and not any(x in backup_data.lower() for x in ["error", "failed", "denied", "not found"]):
+        if backup_data and not any(x in backup_data.lower() for x in ["error", "failed", "denied", "not found", "no such file"]):
             return backup_data, backup_filename
         else:
             log.error(f"Backup failed or returned error: {backup_data}")
-            return None, None
+            # Return the error message so it can be shown to the user
+            return f"ERROR: {backup_data}", None
     except Exception as e:
         log.error(f"Error creating database backup: {str(e)}")
-        return None, None
+        return f"ERROR: {str(e)}", None
 
 
 @check_auth
@@ -105,7 +117,7 @@ async def handle_db_backup(query, container_name):
             
         backup_data, filename = backup_postgres_database(container_name, db_user)
 
-        if backup_data and filename:
+        if filename and backup_data:
             # Send as document
             backup_bytes = BytesIO(backup_data.encode('utf-8'))
             backup_bytes.name = filename
@@ -117,9 +129,11 @@ async def handle_db_backup(query, container_name):
             )
             await query.edit_message_text(f"✅ Backup for {container_name} completed!")
         else:
+            # backup_data contains the error message if filename is None
+            error_msg = backup_data if backup_data else "Unknown error"
             await query.edit_message_text(
-                f"❌ Failed to create backup for {container_name}.\n"
-                f"Possible reasons: external DB unreachable, container not running, or pg_dump not available.")
+                f"❌ Failed to create backup for {container_name}.\n\n"
+                f"Details: `{error_msg}`")
     except Exception as e:
         log.error(f"Error in handle_db_backup: {str(e)}", exc_info=True)
         await query.edit_message_text(f"❌ Error: {str(e)}")
@@ -136,8 +150,8 @@ async def handle_db_upload(query, container_name):
             
         backup_data, filename = backup_postgres_database(container_name, db_user)
         
-        if not backup_data:
-            await query.edit_message_text(f"❌ Failed to create dump for upload.")
+        if not filename:
+            await query.edit_message_text(f"❌ Failed to create dump for upload: {backup_data}")
             return
 
         # Save temporarily to disk for upload

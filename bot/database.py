@@ -23,9 +23,10 @@ def backup_postgres_database(container_name='pg', db_user='postgres'):
         cmd = f"podman exec {container_name} pg_dumpall -U {db_user}"
         backup_data = run_command(cmd, timeout=300) # Increased timeout for large DBs
 
-        if backup_data and not backup_data.startswith("Error"):
+        if backup_data and not any(x in backup_data.lower() for x in ["error", "failed", "denied", "not found"]):
             return backup_data, backup_filename
         else:
+            log.error(f"Backup failed or returned error: {backup_data}")
             return None, None
     except Exception as e:
         log.error(f"Error creating database backup: {str(e)}")
@@ -75,7 +76,7 @@ async def handle_db_backup(query, container_name):
         
         # Determine user - default to postgres, but could be customized
         db_user = 'postgres'
-        if 'ptb-mn' in container_name:
+        if 'ptb-' in container_name:
             db_user = 'ptb_user'
             
         backup_data, filename = backup_postgres_database(container_name, db_user)
@@ -92,8 +93,11 @@ async def handle_db_backup(query, container_name):
             )
             await query.edit_message_text(f"✅ Backup for {container_name} completed!")
         else:
+            # If backup_postgres_database returns None, it means it failed
+            # We should have logged the error in backup_postgres_database
             await query.edit_message_text(
-                f"❌ Failed to create backup for {container_name}. Is it a running PostgreSQL container?")
+                f"❌ Failed to create backup for {container_name}.\n"
+                f"Possible reasons: container not running, wrong DB user, or pg_dumpall not available.")
     except Exception as e:
         log.error(f"Error in handle_db_backup: {str(e)}", exc_info=True)
         await query.edit_message_text(f"❌ Error: {str(e)}")
@@ -107,7 +111,7 @@ async def handle_db_upload(query, container_name):
         await query.edit_message_text(f"🚀 Preparing upload for {container_name}... ⏳")
         
         db_user = 'postgres'
-        if 'ptb-mn' in container_name:
+        if 'ptb-' in container_name:
             db_user = 'ptb_user'
             
         backup_data, filename = backup_postgres_database(container_name, db_user)

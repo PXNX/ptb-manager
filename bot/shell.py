@@ -5,11 +5,11 @@ from config import IS_CONTAINER, PODMAN_SOCK
 from logs import log
 
 
-def run_command(cmd, timeout=30):
+def run_command(cmd, timeout=30, force_local=False):
     """Execute shell command and return output"""
     try:
         # For podman commands in container, use socket connection
-        if cmd.strip().startswith('podman') and IS_CONTAINER:
+        if cmd.strip().startswith('podman') and IS_CONTAINER and not force_local:
             # Use podman with remote socket connection
             cmd = cmd.replace('podman', f'podman --remote --url unix://{PODMAN_SOCK}', 1)
 

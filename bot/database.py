@@ -32,8 +32,9 @@ def backup_postgres_database(container_name='pg', db_user='postgres'):
             # Use pg_dump directly from the manager container for external databases
             # We use --no-owner and --no-privileges to make it more portable
             # IMPORTANT: We use pg_dump directly, NOT via podman exec
+            # We use force_local=True to ensure it runs inside the manager container
             cmd = f"pg_dump \"{db_url}\" --no-owner --no-privileges"
-            backup_data = run_command(cmd, timeout=300)
+            backup_data = run_command(cmd, timeout=300, force_local=True)
             
             # Check if pg_dump command was not found
             if "not found" in backup_data.lower() or "no such file" in backup_data.lower():

@@ -7,6 +7,9 @@ load_dotenv()
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 ALLOWED_USER_IDS = [int(uid) for uid in os.environ.get('ALLOWED_USER_IDS', '').split(',') if uid]
 
+LOG_GROUP_ID = int(os.environ.get('LOG_GROUP_ID', -1001338514957))
+THREAD_ID = int(os.environ.get('THREAD_ID', 5))  # PTB-MANAGER topic
+
 PODMAN_URL = os.getenv('PODMAN_URL', '')  # e.g., tcp://host.containers.internal:8888
 DEFAULT_GITHUB_ORG = os.getenv('DEFAULT_GITHUB_ORG', 'PXNX')
 PODMAN_CMD = os.getenv('PODMAN_CMD', '/usr/bin/podman')

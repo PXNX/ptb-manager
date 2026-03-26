@@ -21,6 +21,7 @@ from setup import setup_and_start_project, newproject_command, handle_message
 from shell import run_command
 from stats import stats_command
 from util import check_auth
+from error_logger import get_error_logger
 
 
 @check_auth
@@ -864,6 +865,9 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # Log the full error with traceback
         log.error(f"Update {update} caused error: {context.error}", exc_info=context.error)
+        # Also log to Telegram group
+        error_logger = get_error_logger()
+        await error_logger.log_error(context.error, f"Error in update handler (Update: {update})")
 
         error_message = f"❌ An error occurred: {str(context.error)}"
 

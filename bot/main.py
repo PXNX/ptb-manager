@@ -954,8 +954,10 @@ def main():
 
     # Poll systemd every 5 minutes and proactively alert admins on
     # failures/crash-loops instead of relying on someone noticing manually.
-    if os.name != 'nt':
+    if os.name != 'nt' and application.job_queue is not None:
         application.job_queue.run_repeating(check_health_job, interval=300, first=60)
+    elif os.name != 'nt':
+        log.error("job_queue unavailable (missing python-telegram-bot[job-queue] extra) - /health command still works, but automatic alerts are disabled")
 
     try:
         application.run_polling(allowed_updates=Update.ALL_TYPES)

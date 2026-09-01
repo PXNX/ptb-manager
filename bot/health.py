@@ -23,13 +23,26 @@ TROUBLED_SUB_STATES = {"failed", "auto-restart"}
 
 
 def get_unit_states():
-    """Return a list of {unit, active, sub} for all watched systemd user units."""
+    """Return a list of {unit, active, sub} for all watched systemd user units.
+
+    Raises RuntimeError if systemctl itself couldn't be reached, so callers
+    can tell "no matching units" apart from "the check didn't actually run" -
+    silently treating a broken check as "all healthy" would be worse than
+    the missing monitoring itself.
+    """
     if os.name == 'nt':
         return []
 
     globs = " ".join(f"'{g}'" for g in WATCHED_UNIT_GLOBS)
     cmd = f"systemctl --user list-units --all {globs} --no-legend --plain --no-pager"
     output = run_command(cmd, timeout=30)
+
+    if "failed to connect to bus" in output.lower():
+        raise RuntimeError(
+            "systemctl --user can't reach the host session bus from inside "
+            "this container (D-Bus EXTERNAL auth rejects the container's "
+            "remapped uid). See ptb-manager.container / quadlets repo."
+        )
 
     units = []
     for line in output.strip().split('\n'):

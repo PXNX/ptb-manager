@@ -279,6 +279,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
+            # Validate the full github_source too (org/repo) - it's interpolated
+            # into a shell command unescaped, so reject anything but the
+            # characters a real GitHub org/repo path can contain.
+            if not all(c.isalnum() or c in '-_/.' for c in github_source):
+                await update.message.reply_text(
+                    "❌ Invalid GitHub source. Use only letters, numbers, hyphens, underscores, dots and a single slash.\n"
+                    "Please try again:"
+                )
+                return
+
             # Check if project already exists
             project_path = os.path.join(PROJECTS_BASE, project_name)
             if os.path.exists(project_path):

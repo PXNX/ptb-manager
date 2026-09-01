@@ -13,6 +13,7 @@ from telegram.ext import (
 
 from config import TELEGRAM_TOKEN, PROJECTS_BASE, ALLOWED_USER_IDS, QUADLETS_DIR, PODMAN_URL, IS_CONTAINER
 from database import dbbackup_command, handle_db_backup, handle_db_upload
+from health import health_command, check_health_job
 from logs import log
 from podman import restart_container, stop_container, start_container, redeploy_command, start_container_command, \
     stop_command, restart_command, get_podman_containers, containers_command
@@ -56,6 +57,8 @@ Available commands:
 
 /status - Show systemd user status (Linux only)
 
+/health - Show fleet health, alerts automatically on failures (Linux only)
+
 /help - Show this message"""
     await update.message.reply_text(welcome_text)
 
@@ -78,7 +81,6 @@ def get_full_container_logs_since(container_id, since='24h'):
     return run_command(cmd, timeout=120)  # 2 minutes timeout
 
 
-@check_auth
 @check_auth
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show systemd user status menu"""
@@ -899,6 +901,7 @@ def main():
             BotCommand("stats", "Show system resources"),
             BotCommand("logs", "Get container logs"),
             BotCommand("status", "Show systemd user status"),
+            BotCommand("health", "Show fleet health"),
             BotCommand("restart", "Restart a container"),
             BotCommand("stop", "Stop a container"),
             BotCommand("start_container", "Start a container"),
@@ -920,12 +923,6 @@ def main():
             except Exception as e:
                 log.error(f"Failed to set commands for admin {admin_id}: {e}")
 
-    log.info("Starting Podman Monitoring Bot...")
-    log.info(f"Allowed user IDs: {ALLOWED_USER_IDS}")
-    log.info(f"Operating System: {os.name}")
-    if PODMAN_URL:
-        log.info(f"Podman URL: {PODMAN_URL}")
-
     defaults = Defaults(parse_mode=ParseMode.HTML)
     application = Application.builder().token(TELEGRAM_TOKEN).defaults(defaults).post_init(post_init).build()
 
@@ -937,7 +934,7 @@ def main():
     application.add_handler(CommandHandler("logs", logs_command))
     application.add_handler(CommandHandler("restart", restart_command))
     application.add_handler(CommandHandler("stop", stop_command))
-    application.add_handler(CommandHandler("start", start_container_command))
+    application.add_handler(CommandHandler("start_container", start_container_command))
     application.add_handler(CommandHandler("redeploy", redeploy_command))
     application.add_handler(CommandHandler("quadlets", quadlets_command))
     application.add_handler(CommandHandler("envfiles", envfiles_command))
@@ -945,6 +942,7 @@ def main():
     application.add_handler(CommandHandler("dbbackup", dbbackup_command))
     application.add_handler(CommandHandler("newproject", newproject_command))
     application.add_handler(CommandHandler("status", status_command))
+    application.add_handler(CommandHandler("health", health_command))
 
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
@@ -953,6 +951,11 @@ def main():
 
     # Error handler
     application.add_error_handler(error_handler)
+
+    # Poll systemd every 5 minutes and proactively alert admins on
+    # failures/crash-loops instead of relying on someone noticing manually.
+    if os.name != 'nt':
+        application.job_queue.run_repeating(check_health_job, interval=300, first=60)
 
     try:
         application.run_polling(allowed_updates=Update.ALL_TYPES)

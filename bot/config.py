@@ -5,7 +5,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-ALLOWED_USER_IDS = [int(uid) for uid in os.environ.get('ALLOWED_USER_IDS', '').split(',') if uid]
+# Tolerate both `1,2,3` and a Python/JSON-list-looking `[1,2,3]` in the .env,
+# since a restart (e.g. via /redeploy) previously never actually happened in
+# practice, letting a bracketed value sit unnoticed until it crash-looped
+# the bot on the next real restart.
+ALLOWED_USER_IDS = [
+    int(uid.strip().strip('[]').strip('"\''))
+    for uid in os.environ.get('ALLOWED_USER_IDS', '').split(',')
+    if uid.strip().strip('[]').strip('"\'')
+]
 
 LOG_GROUP_ID = int(os.environ.get('LOG_GROUP_ID', -1001338514957))
 THREAD_ID = int(os.environ.get('THREAD_ID', 5))  # PTB-MANAGER topic

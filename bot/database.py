@@ -5,6 +5,8 @@ from io import BytesIO
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
+from ghauth import require_token
+from github_auth import gh_env
 from logs import log
 from shell import run_command
 from util import check_auth
@@ -144,8 +146,12 @@ async def handle_db_backup(query, container_name):
 async def handle_db_upload(query, container_name):
     """Upload database dump to a remote destination (e.g. via gh or s3)"""
     try:
+        token = await require_token(query.edit_message_text, query.from_user.id)
+        if not token:
+            return
+
         await query.edit_message_text(f"🚀 Preparing upload for {container_name}... ⏳")
-        
+
         db_user = 'postgres'
         if 'ptb-' in container_name:
             db_user = 'ptb_user'
@@ -164,7 +170,7 @@ async def handle_db_upload(query, container_name):
         # Example: Upload using GitHub CLI as a secret gist
         await query.edit_message_text(f"📤 Uploading {filename} to GitHub Gist... ⏳")
         cmd = f"gh gist create {temp_path} -d 'Database Backup {container_name} {datetime.now()}'"
-        gist_url = run_command(cmd)
+        gist_url = run_command(cmd, env=gh_env(token))
         
         # Cleanup
         if os.path.exists(temp_path):

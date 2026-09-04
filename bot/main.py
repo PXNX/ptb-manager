@@ -13,6 +13,8 @@ from telegram.ext import (
 
 from config import TELEGRAM_TOKEN, PROJECTS_BASE, ALLOWED_USER_IDS, QUADLETS_DIR, PODMAN_URL, IS_CONTAINER
 from database import dbbackup_command, handle_db_backup, handle_db_upload
+from ghauth import ghauth_command, require_token
+from github_auth import gh_env
 from health import health_command, check_health_job
 from logs import log
 from podman import restart_container, stop_container, start_container, redeploy_command, start_container_command, \
@@ -54,6 +56,8 @@ Available commands:
 /dbbackup - Backup PostgreSQL database
 
 /newproject - Setup a new project (Linux only)
+
+/ghauth - Link your personal GitHub token (needed for clone/sync/redeploy)
 
 /status - Show systemd user status (Linux only)
 
@@ -549,11 +553,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             # Special case: self-redeploy for ptb-manager
             if service == "ptb-manager":
+                token = await require_token(query.edit_message_text, query.from_user.id)
+                if not token:
+                    return
+
                 await query.edit_message_text("🔄 Safe self-redeploying ptb-manager...")
-                
+
                 # Use current directory for self-redeploy
                 manager_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                
+
                 # In container, the .git directory might be in the host projects directory
                 # but we should check where we actually are.
                 if IS_CONTAINER:
@@ -561,14 +569,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     manager_path = os.path.join(PROJECTS_BASE, "ptb-manager")
 
                 log.info(f"Self-redeploy path: {manager_path}")
-                
+
                 # Get current commit hash for potential rollback
                 current_commit = run_command(f"cd {manager_path} && git rev-parse HEAD").strip()
                 log.info(f"Current commit for ptb-manager: {current_commit}")
-                
+
                 sync_cmd = f"cd {manager_path} && gh repo sync"
-                sync_output = run_command(sync_cmd, timeout=60)
-                
+                sync_output = run_command(sync_cmd, timeout=60, env=gh_env(token))
+
                 result_text = "✅ <b>Safe self-redeploy initiated for ptb-manager</b>\n\n"
                 if "fatal" in sync_output.lower() or "error" in sync_output.lower():
                     result_text += f"❌ Repository sync failed:\n<code>{sync_output}</code>\n\n"
@@ -577,22 +585,26 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return
                 else:
                     result_text += f"📥 Repository sync: {sync_output if sync_output.strip() else 'Already up to date ✓'}\n\n"
-                
+
                 # Prepare rollback and log-reporting script/trigger
                 user_id = query.from_user.id
                 if IS_CONTAINER:
-                    trigger_dir = os.path.join(PROJECTS_BASE, '.triggers')
-                    os.makedirs(trigger_dir, exist_ok=True)
-                    import time
-                    
-                    # Create the main restart trigger
-                    restart_trigger = os.path.join(trigger_dir, f"restart-ptb-manager-{int(time.time())}.trigger")
-                    with open(restart_trigger, 'w') as f:
-                        f.write("systemctl --user restart ptb-manager\n")
-                    
-                    result_text += "🔄 The systemd path watcher will restart ptb-manager in a few seconds!\n\n"
-                    result_text += f"🛡️ <b>Rollback info:</b> If it fails, run this on host:\n"
+                    # The host's systemd --user bus is bind-mounted into this
+                    # container (see quadlets/ptb-manager.container), so we can
+                    # restart ourselves directly - no path-watcher needed.
+                    # --no-block: the call returns immediately instead of
+                    # waiting for the unit to come back up, since systemd is
+                    # about to tear down the very container issuing the call.
+                    result_text += "🔄 Restarting now via systemd...\n\n"
+                    result_text += f"🛡️ <b>Rollback info:</b> If it fails to come back up, run this on host:\n"
                     result_text += f"<code>cd {manager_path} && git reset --hard {current_commit} && systemctl --user restart ptb-manager</code>"
+
+                    # Send the confirmation before triggering the restart -
+                    # this process (and its container) will be killed shortly
+                    # after the call below returns.
+                    await query.edit_message_text(result_text)
+                    run_command("systemctl --user restart --no-block ptb-manager", timeout=10)
+                    return
                 else:
                     # On host, we can schedule a rollback AND a log report
                     # We use a python one-liner to send the message if it fails
@@ -620,6 +632,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 return
 
+            token = await require_token(query.edit_message_text, query.from_user.id)
+            if not token:
+                return
+
             await query.edit_message_text(f"🔄 Redeploying {service}...")
 
             project_path = os.path.join(PROJECTS_BASE, service)
@@ -643,7 +659,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             sync_cmd = " && ".join(sync_steps)
 
-            sync_output = run_command(sync_cmd, timeout=60)
+            sync_output = run_command(sync_cmd, timeout=60, env=gh_env(token))
 
             result_text = f"✅ <b>Redeploy completed for {service}</b>\n\n"
 
@@ -661,60 +677,23 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 result_text += f"📥 Repository sync: Already up to date ✓\n\n"
 
-            # Step 2: Restart the service
+            # Step 2: Restart the service. The host's systemd --user bus is
+            # bind-mounted into this container (see quadlets/ptb-manager.container),
+            # so systemctl can be run directly - no path-watcher/trigger-file
+            # relay needed (unlike a self-restart, restarting a *different*
+            # service doesn't kill the process making this call).
 
-            if IS_CONTAINER:
+            restart_cmd = f"systemctl --user restart {service}"
 
-                # Create a trigger file for the systemd path watcher
+            restart_output = run_command(restart_cmd, timeout=30)
 
-                trigger_dir = os.path.join(PROJECTS_BASE, '.triggers')
+            if restart_output.strip():
 
-                os.makedirs(trigger_dir, exist_ok=True)
-
-                import time
-
-                trigger_file = os.path.join(trigger_dir, f"restart-{service}-{int(time.time())}.trigger")
-
-                try:
-
-                    with open(trigger_file, 'w') as f:
-
-                        f.write(f"systemctl --user restart {service}\n")
-
-                    log.info(f"Created trigger file: {trigger_file}")
-
-                    result_text += "✅ Restart command queued via trigger file\n"
-
-                    result_text += f"🔄 The systemd path watcher will restart {service}\n\n"
-
-                    result_text += "The container should restart automatically in a few seconds!"
-
-
-                except Exception as e:
-
-                    log.error(f"Error creating trigger file: {e}")
-
-                    result_text += f"\n⚠️ Could not create trigger file: {e}\n\n"
-
-                    result_text += "Please run this command manually on your host:\n\n"
-
-                    result_text += f"<code>systemctl --user restart {service}</code>"
+                result_text += f"🔄 Service restart:\n<code>{restart_output}</code>"
 
             else:
 
-                # Running on host - execute normally
-
-                restart_cmd = f"systemctl --user restart {service}"
-
-                restart_output = run_command(restart_cmd, timeout=30)
-
-                if restart_output.strip():
-
-                    result_text += f"🔄 Service restart:\n<code>{restart_output}</code>"
-
-                else:
-
-                    result_text += f"🔄 Service restart: Completed successfully ✓"
+                result_text += f"🔄 Service restart: Completed successfully ✓"
 
             log.info(f"Redeploy completed for {service}")
 
@@ -722,9 +701,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif data == 'quadlets_update':
             log.info("Updating quadlets from GitHub")
+
+            token = await require_token(query.edit_message_text, query.from_user.id)
+            if not token:
+                return
+
             await query.edit_message_text("📥 Syncing quadlets repository from GitHub...")
 
-            output = update_quadlets_repo()
+            output = update_quadlets_repo(token)
 
             result_text = "✅ *Quadlets Repository Updated*\n\n"
             if output.strip():
@@ -839,9 +823,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             project_name = data.replace('setup_', '')
             log.info(f"Setting up and starting project: {project_name}")
 
+            token = await require_token(query.edit_message_text, query.from_user.id)
+            if not token:
+                return
+
             await query.edit_message_text(f"🔄 Setting up {project_name}...\n\nThis may take a moment.")
 
-            output = setup_and_start_project(project_name)
+            output = setup_and_start_project(project_name, token)
 
             result_text = f"✅ *Setup completed for {project_name}*\n\n"
             result_text += f"The container should now be starting.\n\n"
@@ -911,6 +899,7 @@ def main():
             BotCommand("envfile", "View project .env files"),
             BotCommand("dbbackup", "Backup PostgreSQL database"),
             BotCommand("newproject", "Setup a new project"),
+            BotCommand("ghauth", "Link your personal GitHub token"),
             BotCommand("help", "Show help message"),
         ]
         for admin_id in ALLOWED_USER_IDS:
@@ -941,6 +930,7 @@ def main():
     application.add_handler(CommandHandler("envfile", envfiles_command))
     application.add_handler(CommandHandler("dbbackup", dbbackup_command))
     application.add_handler(CommandHandler("newproject", newproject_command))
+    application.add_handler(CommandHandler("ghauth", ghauth_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("health", health_command))
 

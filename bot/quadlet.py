@@ -6,6 +6,7 @@ from telegram import InlineKeyboardButton, Update, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from config import QUADLETS_DIR
+from github_auth import gh_env
 from logs import log
 from shell import run_command
 from util import check_auth
@@ -35,11 +36,11 @@ def get_quadlet_files():
         return []
 
 
-def update_quadlets_repo():
+def update_quadlets_repo(token=None):
     """Sync quadlets repository from GitHub"""
     try:
         cmd = f"cd {QUADLETS_DIR} && gh repo sync"
-        output = run_command(cmd, timeout=60)
+        output = run_command(cmd, timeout=60, env=gh_env(token) if token else None)
         return output
     except Exception as e:
         log.error(f"Error updating quadlets repo: {str(e)}")

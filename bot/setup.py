@@ -3,38 +3,13 @@ import os
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
-from config import PROJECTS_BASE, QUADLETS_DIR, DEFAULT_GITHUB_ORG, IS_CONTAINER, HOST_USER
+from config import PROJECTS_BASE, QUADLETS_DIR, DEFAULT_GITHUB_ORG, HOST_USER
+from ghauth import require_token
+from github_auth import gh_env
 from logs import log
 from shell import run_command
 from util import check_auth
 from template import generate_project_files
-
-
-def clone_github_repo(project_name, github_source=None):
-    """Clone GitHub repository into project directory"""
-    try:
-        project_path = os.path.join(PROJECTS_BASE, project_name)
-
-        # If no source provided, use default org
-        if not github_source:
-            github_source = f"{DEFAULT_GITHUB_ORG}/{project_name}"
-
-        # Construct GitHub URL
-        repo_url = f"https://github.com/{github_source}.git"
-
-        # Clone the repository
-        cmd = f"cd {PROJECTS_BASE} && gh repo clone {repo_url}"
-        output = run_command(cmd)
-
-        if "fatal" in output.lower() or "error" in output.lower():
-            log.error(f"Error cloning repo: {output}")
-            return False, output
-
-        log.info(f"Cloned repository: {github_source} to {project_path}")
-        return True, output
-    except Exception as e:
-        log.error(f"Error cloning GitHub repo: {str(e)}")
-        return False, f"Error: {str(e)}"
 
 
 def create_project_directory(project_name):
@@ -69,7 +44,7 @@ def create_env_file(project_name, env_content):
         return False, f"Error: {str(e)}"
 
 
-def setup_and_start_project(project_name):
+def setup_and_start_project(project_name, token=None):
     """Setup project with quadlets sync, daemon reload and container start"""
     try:
         # Step 1: Sync quadlets from GitHub
@@ -78,7 +53,7 @@ def setup_and_start_project(project_name):
             "gh repo sync"
         ]
         sync_cmd = " && ".join(sync_steps)
-        sync_output = run_command(sync_cmd, timeout=60)
+        sync_output = run_command(sync_cmd, timeout=60, env=gh_env(token) if token else None)
 
         if "fatal" in sync_output.lower() or "error" in sync_output.lower():
             log.error(f"Error syncing quadlets: {sync_output}")
@@ -86,39 +61,17 @@ def setup_and_start_project(project_name):
 
         output = f"✅ Quadlet sync completed:\n{sync_output}\n\n"
 
-        # Step 2: For systemctl commands, we need to create a trigger file
-        # that the host can watch and act upon
-        if IS_CONTAINER:
-            # Create a trigger file that tells the host to reload and start
-            trigger_file = os.path.join(PROJECTS_BASE, '.systemctl-trigger')
-            try:
-                with open(trigger_file, 'w') as f:
-                    f.write(f"daemon-reload\n")
-                    f.write(f"start {project_name}\n")
+        # Step 2: reload the daemon and start the new unit. The host's
+        # systemd --user bus is bind-mounted into this container (see
+        # quadlets/ptb-manager.container), so systemctl can be run directly.
+        systemctl_steps = [
+            "systemctl --user daemon-reload",
+            f"systemctl --user start {project_name}"
+        ]
+        systemctl_cmd = " && ".join(systemctl_steps)
+        systemctl_output = run_command(systemctl_cmd, timeout=30)
 
-                output += "📝 Created trigger file for systemctl commands.\n\n"
-                output += "⚠️ <b>Manual step required:</b>\n"
-                output += "Run these commands on your host:\n\n"
-                output += f"<code>systemctl --user daemon-reload</code>\n"
-                output += f"<code>systemctl --user start {project_name}</code>\n\n"
-                output += "The quadlet has been synced and is ready to start!"
-
-            except Exception as e:
-                log.error(f"Error creating trigger file: {e}")
-                output += f"\n⚠️ Could not create trigger file.\n\n"
-                output += "Please run these commands manually on your host:\n\n"
-                output += f"<code>systemctl --user daemon-reload</code>\n"
-                output += f"<code>systemctl --user start {project_name}</code>"
-        else:
-            # Running on host - execute normally
-            systemctl_steps = [
-                "systemctl --user daemon-reload",
-                f"systemctl --user start {project_name}"
-            ]
-            systemctl_cmd = " && ".join(systemctl_steps)
-            systemctl_output = run_command(systemctl_cmd, timeout=30)
-
-            output += f"✅ Systemd reload and service start:\n{systemctl_output}"
+        output += f"✅ Systemd reload and service start:\n{systemctl_output}"
 
         return output
 
@@ -135,6 +88,9 @@ async def newproject_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text(
                 "❌ New project setup is not supported on Windows."
             )
+            return
+
+        if not await require_token(update.message.reply_text, update.effective_user.id):
             return
 
         await update.message.reply_text(
@@ -157,7 +113,7 @@ async def newproject_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
-def clone_github_repo(project_name, github_source=None):
+def clone_github_repo(project_name, github_source=None, token=None):
     """Clone GitHub repository into project directory"""
     try:
         project_path = os.path.join(PROJECTS_BASE, project_name)
@@ -185,7 +141,7 @@ def clone_github_repo(project_name, github_source=None):
         log.info(f"PROJECTS_BASE: {PROJECTS_BASE}")
         log.info(f"Target project_path: {project_path}")
 
-        output = run_command(cmd, timeout=60)  # Increase timeout for cloning
+        output = run_command(cmd, timeout=60, env=gh_env(token) if token else None)  # Increase timeout for cloning
 
         if "fatal" in output.lower() or "error" in output.lower():
             log.error(f"Error cloning repo: {output}")
@@ -299,6 +255,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data.clear()
                 return
 
+            token = await require_token(update.message.reply_text, update.effective_user.id)
+            if not token:
+                context.user_data.clear()
+                return
+
             # Clone the repository
             await update.message.reply_text(
                 f"📥 Cloning repository: <code>{github_source}</code>\n"
@@ -306,14 +267,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Please wait..."
             )
 
-            success, result = clone_github_repo(project_name, github_source)
+            success, result = clone_github_repo(project_name, github_source, token)
 
             if not success:
                 await update.message.reply_text(
                     f"❌ Failed to clone repository:\n\n<code>{result}</code>\n\n"
                     f"Please check:\n"
                     f"• Repository exists and is accessible\n"
-                    f"• You have gh CLI installed and authenticated\n"
+                    f"• Your linked GitHub token (/ghauth) has access to it\n"
                     f"• The repository name is correct\n\n"
                     f"Debug info:\n"
                     f"• PROJECTS_BASE: <code>{PROJECTS_BASE}</code>\n"

@@ -25,3 +25,7 @@ if IS_CONTAINER:
 else:
     PROJECTS_BASE = os.path.expanduser(os.getenv('PROJECTS_BASE', '~/projects'))
     QUADLETS_DIR = os.path.expanduser('~/.config/containers/systemd')
+
+# Per-Telegram-user GitHub tokens, stored outside any git-managed project
+# directory (PROJECTS_BASE is a sibling of the ptb-manager repo checkout).
+GITHUB_TOKENS_FILE = os.path.join(PROJECTS_BASE, '.ptb-manager-data', 'github_tokens.json')

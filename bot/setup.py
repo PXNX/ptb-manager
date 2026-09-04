@@ -61,9 +61,7 @@ def setup_and_start_project(project_name, token=None):
 
         output = f"✅ Quadlet sync completed:\n{sync_output}\n\n"
 
-        # Step 2: reload the daemon and start the new unit. The host's
-        # systemd --user bus is bind-mounted into this container (see
-        # quadlets/ptb-manager.container), so systemctl can be run directly.
+        # Step 2: reload the daemon and start the new unit.
         systemctl_steps = [
             "systemctl --user daemon-reload",
             f"systemctl --user start {project_name}"
@@ -71,7 +69,17 @@ def setup_and_start_project(project_name, token=None):
         systemctl_cmd = " && ".join(systemctl_steps)
         systemctl_output = run_command(systemctl_cmd, timeout=30)
 
-        output += f"✅ Systemd reload and service start:\n{systemctl_output}"
+        if "failed to connect to bus" in systemctl_output.lower():
+            output += (
+                f"❌ Could not reload/start automatically: <code>{systemctl_output.strip()}</code>\n\n"
+                "Known limitation: systemctl --user can't reach the host session bus "
+                "from inside this container yet (see ptb-manager.container / quadlets repo). "
+                "Please run these manually on the host:\n\n"
+                f"<code>systemctl --user daemon-reload</code>\n"
+                f"<code>systemctl --user start {project_name}</code>"
+            )
+        else:
+            output += f"✅ Systemd reload and service start:\n{systemctl_output}"
 
         return output
 

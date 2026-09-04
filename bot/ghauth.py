@@ -27,9 +27,11 @@ async def ghauth_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not token:
             await update.message.reply_text(
                 "🔑 You haven't linked a GitHub token yet.\n\n"
-                "Create a token at https://github.com/settings/tokens "
-                "(a fine-grained token scoped to the repos ptb-manager needs is best) "
-                "and send it here as:\n"
+                "1. Go to https://github.com/settings/tokens/new to create one\n"
+                "2. Give it the <code>repo</code> scope (clone/sync repos) and "
+                "<code>gist</code> scope (needed for /dbbackup uploads) — a classic "
+                "token with just those two is simplest\n"
+                "3. Send it here as:\n"
                 "<code>/ghauth ghp_xxxxxxxx</code>\n\n"
                 "⚠️ Only send it in a private chat with the bot."
             )
@@ -75,7 +77,9 @@ async def require_token(message_target, user_id):
     if not token:
         await message_target(
             "🔑 You need to link a GitHub token first.\n"
-            "Send <code>/ghauth &lt;token&gt;</code> in a private chat with the bot, then try again."
+            "Create one at https://github.com/settings/tokens/new (with the "
+            "<code>repo</code> and <code>gist</code> scopes), then send it here as "
+            "<code>/ghauth &lt;token&gt;</code> in a private chat, then try again."
         )
         return None
     return token

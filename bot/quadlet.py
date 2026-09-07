@@ -5,10 +5,11 @@ from pathlib import Path
 from telegram import InlineKeyboardButton, Update, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from config import QUADLETS_DIR
+from config import QUADLETS_DIR, IS_CONTAINER
 from github_auth import gh_env
 from logs import log
 from shell import run_command
+from triggers import write_trigger
 from util import check_auth
 
 
@@ -50,7 +51,13 @@ def update_quadlets_repo(token=None):
 def reload_systemd_quadlets():
     """Reload systemd daemon after quadlet changes"""
     try:
-        # We don't do 'gh repo sync' here anymore as it's a separate step now
+        # systemctl --user can't reach the host bus directly from inside
+        # this container (see quadlets/README.md's "Redeploy watcher"
+        # section) - queue it via the host-side watcher instead.
+        if IS_CONTAINER:
+            write_trigger('reload')
+            return "🔄 Reload queued - the host-side watcher will run it within a few seconds."
+
         cmd = "systemctl --user daemon-reload"
         output = run_command(cmd)
         return output

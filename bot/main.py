@@ -23,6 +23,7 @@ from quadlet import reload_systemd_quadlets, update_quadlets_repo, get_quadlet_f
 from setup import setup_and_start_project, newproject_command, handle_message
 from shell import run_command
 from stats import stats_command
+from triggers import write_trigger
 from util import check_auth
 from error_logger import get_error_logger
 
@@ -589,32 +590,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Prepare rollback and log-reporting script/trigger
                 user_id = query.from_user.id
                 if IS_CONTAINER:
-                    # --no-block: don't wait for the unit to come back up,
-                    # since systemd is about to tear down the very container
-                    # issuing the call. We still check its own output though -
-                    # systemctl --user currently can't reach the host session
-                    # bus from inside this container at all (D-Bus EXTERNAL
-                    # auth rejects the container's remapped uid, same as
-                    # /health reports), so this reliably fails right now.
-                    restart_output = run_command("systemctl --user restart --no-block ptb-manager", timeout=10)
+                    # systemctl --user can't be called directly from inside
+                    # this container (see quadlets/README.md's "Redeploy
+                    # watcher" section for why). A host-native systemd path
+                    # unit watches for this trigger file and does the actual
+                    # restart from outside the container, so it isn't killed
+                    # mid-restart the way calling it from in here would be.
+                    write_trigger('restart', 'ptb-manager')
 
-                    if restart_output.strip():
-                        result_text += (
-                            f"❌ Could not restart automatically: <code>{restart_output.strip()}</code>\n\n"
-                            "Known limitation: systemctl --user can't reach the host "
-                            "session bus from inside this container yet (see ptb-manager.container "
-                            "/ quadlets repo). Please restart manually:\n\n"
-                            "<code>systemctl --user restart ptb-manager</code>"
-                        )
-                        await query.edit_message_text(result_text)
-                        return
-
-                    result_text += "🔄 Restarting now via systemd...\n\n"
+                    result_text += "🔄 Restart queued - the host-side watcher will restart ptb-manager within a few seconds.\n\n"
                     result_text += f"🛡️ <b>Rollback info:</b> If it fails to come back up, run this on host:\n"
                     result_text += f"<code>cd {manager_path} && git reset --hard {current_commit} && systemctl --user restart ptb-manager</code>"
 
-                    # Send the confirmation now - this process (and its
-                    # container) will be killed shortly.
                     await query.edit_message_text(result_text)
                     return
                 else:
@@ -689,25 +676,21 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 result_text += f"📥 Repository sync: Already up to date ✓\n\n"
 
-            # Step 2: Restart the service directly via systemctl - unlike a
-            # self-restart, restarting a *different* service doesn't kill the
-            # process making this call, so blocking on the result is fine.
-            restart_cmd = f"systemctl --user restart {service}"
-
-            restart_output = run_command(restart_cmd, timeout=30)
-
-            if "failed to connect to bus" in restart_output.lower():
-                result_text += (
-                    f"❌ Could not restart: <code>{restart_output.strip()}</code>\n\n"
-                    "Known limitation: systemctl --user can't reach the host session "
-                    "bus from inside this container yet (see ptb-manager.container / "
-                    "quadlets repo). Please restart manually:\n\n"
-                    f"<code>systemctl --user restart {service}</code>"
-                )
-            elif restart_output.strip():
-                result_text += f"🔄 Service restart:\n<code>{restart_output}</code>"
+            # Step 2: restart the service. Inside the container, systemctl
+            # --user can't reach the host bus directly (see quadlets/README.md's
+            # "Redeploy watcher" section), so queue it via the host-side
+            # watcher instead; on the host it can just be called directly.
+            if IS_CONTAINER:
+                write_trigger('restart', service)
+                result_text += f"🔄 Restart queued - the host-side watcher will restart {service} within a few seconds."
             else:
-                result_text += f"🔄 Service restart: Completed successfully ✓"
+                restart_cmd = f"systemctl --user restart {service}"
+                restart_output = run_command(restart_cmd, timeout=30)
+
+                if restart_output.strip():
+                    result_text += f"🔄 Service restart:\n<code>{restart_output}</code>"
+                else:
+                    result_text += f"🔄 Service restart: Completed successfully ✓"
 
             log.info(f"Redeploy completed for {service}")
 

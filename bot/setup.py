@@ -3,11 +3,12 @@ import os
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
-from config import PROJECTS_BASE, QUADLETS_DIR, DEFAULT_GITHUB_ORG, HOST_USER
+from config import PROJECTS_BASE, QUADLETS_DIR, DEFAULT_GITHUB_ORG, HOST_USER, IS_CONTAINER
 from ghauth import require_token
 from github_auth import gh_env
 from logs import log
 from shell import run_command
+from triggers import write_trigger
 from util import check_auth
 from template import generate_project_files
 
@@ -61,24 +62,20 @@ def setup_and_start_project(project_name, token=None):
 
         output = f"✅ Quadlet sync completed:\n{sync_output}\n\n"
 
-        # Step 2: reload the daemon and start the new unit.
-        systemctl_steps = [
-            "systemctl --user daemon-reload",
-            f"systemctl --user start {project_name}"
-        ]
-        systemctl_cmd = " && ".join(systemctl_steps)
-        systemctl_output = run_command(systemctl_cmd, timeout=30)
-
-        if "failed to connect to bus" in systemctl_output.lower():
-            output += (
-                f"❌ Could not reload/start automatically: <code>{systemctl_output.strip()}</code>\n\n"
-                "Known limitation: systemctl --user can't reach the host session bus "
-                "from inside this container yet (see ptb-manager.container / quadlets repo). "
-                "Please run these manually on the host:\n\n"
-                f"<code>systemctl --user daemon-reload</code>\n"
-                f"<code>systemctl --user start {project_name}</code>"
-            )
+        # Step 2: reload the daemon and start the new unit. Inside the
+        # container, systemctl --user can't reach the host bus directly (see
+        # quadlets/README.md's "Redeploy watcher" section), so queue it via
+        # the host-side watcher instead; on the host it can just run directly.
+        if IS_CONTAINER:
+            write_trigger('setup', project_name)
+            output += f"🔄 Reload + start queued - the host-side watcher will start {project_name} within a few seconds."
         else:
+            systemctl_steps = [
+                "systemctl --user daemon-reload",
+                f"systemctl --user start {project_name}"
+            ]
+            systemctl_cmd = " && ".join(systemctl_steps)
+            systemctl_output = run_command(systemctl_cmd, timeout=30)
             output += f"✅ Systemd reload and service start:\n{systemctl_output}"
 
         return output

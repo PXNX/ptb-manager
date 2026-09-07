@@ -28,8 +28,12 @@ class ErrorLogger:
         if self.log_group_id and self.thread_id:
             try:
                 error_msg = self._format_error_message(error, context_msg, error_trace)
+                chat_id = self.log_group_id
+                if str(chat_id).isdigit() and not str(chat_id).startswith("-"):
+                    chat_id = int(f"-100{chat_id}")
+
                 await self.bot.send_message(
-                    chat_id=self.log_group_id,
+                    chat_id=chat_id,
                     message_thread_id=self.thread_id,
                     text=error_msg,
                     parse_mode="HTML"

@@ -16,7 +16,7 @@ ALLOWED_USER_IDS = [
 ]
 
 LOG_GROUP_ID = int(os.environ.get('LOG_GROUP_ID', -1001338514957))
-THREAD_ID = int(os.environ.get('THREAD_ID', 5))  # PTB-MANAGER topic
+THREAD_ID = int(os.environ.get('THREAD_ID', 490))  # PTB-MANAGER topic
 
 PODMAN_URL = os.getenv('PODMAN_URL', '')  # e.g., tcp://host.containers.internal:8888
 DEFAULT_GITHUB_ORG = os.getenv('DEFAULT_GITHUB_ORG', 'PXNX')
